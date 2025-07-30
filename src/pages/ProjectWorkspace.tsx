@@ -77,23 +77,26 @@ function ProjectWorkspace() {
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
-  const [isEditing, setIsEditing] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+const isCreating = !id; 
+const [isEditing, setIsEditing] = useState(isCreating);
+
 
   // Mock project data
-  const [project, setProject] = useState<Project>({
-    id: '1',
-    projectId: 'PRJ-2024-001',
-    clientName: 'Sarah & John Wedding',
-    shootType: 'Wedding',
-    eventDate: '2024-03-15',
-    status: 'In Progress',
-    venue: 'Goa Beach Resort',
-    budget: 125000,
-    notes: 'Outdoor ceremony with beach backdrop. Client prefers natural lighting.',
-    source: 'Website Lead'
-  });
+const [project, setProject] = useState<Project>({
+  id: '',
+  projectId: '',
+  clientName: '',
+  shootType: '',
+  eventDate: '',
+  status: 'Upcoming',
+  venue: '',
+  budget: 0,
+  notes: '',
+  source: ''
+});
+
 
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([
     {
@@ -276,6 +279,7 @@ function ProjectWorkspace() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
+                {/* Client Name */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Client Name</label>
                   {isEditing ? (
@@ -283,13 +287,14 @@ function ProjectWorkspace() {
                       type="text"
                       value={project.clientName}
                       onChange={(e) => setProject(prev => ({ ...prev, clientName: e.target.value }))}
-                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
                     <p className="text-[#2D2D2D] font-medium">{project.clientName}</p>
                   )}
                 </div>
 
+                {/* Budget */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Budget</label>
                   {isEditing ? (
@@ -297,21 +302,23 @@ function ProjectWorkspace() {
                       type="number"
                       value={project.budget}
                       onChange={(e) => setProject(prev => ({ ...prev, budget: parseInt(e.target.value) }))}
-                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
                     <p className="text-[#2D2D2D] font-medium">₹{project.budget.toLocaleString()}</p>
                   )}
                 </div>
 
+                {/* Source */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Source</label>
                   {isEditing ? (
                     <select
                       value={project.source}
                       onChange={(e) => setProject(prev => ({ ...prev, source: e.target.value }))}
-                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     >
+                      <option value="">Select Source</option>
                       <option value="Website Lead">Website Lead</option>
                       <option value="Referral">Referral</option>
                       <option value="Social Media">Social Media</option>
@@ -324,6 +331,7 @@ function ProjectWorkspace() {
               </div>
 
               <div className="space-y-4">
+                {/* Venue */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Event Location</label>
                   {isEditing ? (
@@ -331,32 +339,55 @@ function ProjectWorkspace() {
                       type="text"
                       value={project.venue}
                       onChange={(e) => setProject(prev => ({ ...prev, venue: e.target.value }))}
-                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
                     <p className="text-[#2D2D2D] font-medium">{project.venue}</p>
                   )}
                 </div>
 
+                {/* Event Date */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Event Date</label>
-                  <p className="text-[#2D2D2D] font-medium">
-                    {new Date(project.eventDate).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </p>
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={project.eventDate}
+                      onChange={(e) => setProject(prev => ({ ...prev, eventDate: e.target.value }))}
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
+                    />
+                  ) : (
+                    <p className="text-[#2D2D2D] font-medium">
+                      {project.eventDate
+                        ? new Date(project.eventDate).toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })
+                        : '-'}
+                    </p>
+                  )}
                 </div>
 
+                {/* Project ID */}
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Project ID</label>
-                  <p className="text-[#2D2D2D] font-medium">{project.projectId}</p>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={project.projectId}
+                      onChange={(e) => setProject(prev => ({ ...prev, projectId: e.target.value }))}
+                      className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
+                    />
+                  ) : (
+                    <p className="text-[#2D2D2D] font-medium">{project.projectId || '-'}</p>
+                  )}
                 </div>
               </div>
             </div>
 
+            {/* Notes */}
             <div>
               <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Notes</label>
               {isEditing ? (
@@ -364,7 +395,7 @@ function ProjectWorkspace() {
                   value={project.notes}
                   onChange={(e) => setProject(prev => ({ ...prev, notes: e.target.value }))}
                   rows={4}
-                  className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200 resize-none"
+                  className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] resize-none"
                 />
               ) : (
                 <p className="text-[#2D2D2D] leading-relaxed">{project.notes}</p>

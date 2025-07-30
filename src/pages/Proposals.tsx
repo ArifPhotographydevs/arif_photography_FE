@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
+import { useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -25,7 +26,7 @@ interface Proposal {
   id: string;
   proposalId: string;
   clientName: string;
-  clientEmail: string;
+  clientEmail?: string;
   leadId: string;
   shootType: string;
   eventDate: string;
@@ -56,127 +57,49 @@ function Proposals() {
   });
 
   // Mock proposals data
-  const [proposals] = useState<Proposal[]>([
-    {
-      id: '1',
-      proposalId: 'PROP-2024-001',
-      clientName: 'Sarah Johnson',
-      clientEmail: 'sarah@email.com',
-      leadId: 'LEAD-2024-001',
-      shootType: 'Wedding',
-      eventDate: '2024-03-15',
-      totalAmount: 125000,
-      status: 'Accepted',
-      sentDate: '2024-01-20',
-      viewedDate: '2024-01-21',
-      responseDate: '2024-01-22',
-      validUntil: '2024-02-20',
-      services: [
-        { name: 'Wedding Photography', price: 75000 },
-        { name: 'Pre-Wedding Shoot', price: 35000 }
-      ],
-      addOns: [
-        { name: 'Drone Photography', price: 15000 }
-      ],
-      notes: 'Client requested outdoor ceremony coverage'
-    },
-    {
-      id: '2',
-      proposalId: 'PROP-2024-002',
-      clientName: 'Raj Patel',
-      clientEmail: 'raj@email.com',
-      leadId: 'LEAD-2024-002',
-      shootType: 'Pre-Wedding',
-      eventDate: '2024-02-28',
-      totalAmount: 45000,
-      status: 'Sent',
-      sentDate: '2024-01-25',
-      viewedDate: '2024-01-26',
-      validUntil: '2024-02-25',
-      services: [
-        { name: 'Pre-Wedding Photography', price: 35000 }
-      ],
-      addOns: [
-        { name: 'Highlight Reel', price: 10000 }
-      ]
-    },
-    {
-      id: '3',
-      proposalId: 'PROP-2024-003',
-      clientName: 'Emma Wilson',
-      clientEmail: 'emma@email.com',
-      leadId: 'LEAD-2024-003',
-      shootType: 'Maternity',
-      eventDate: '2024-02-10',
-      totalAmount: 25000,
-      status: 'Viewed',
-      sentDate: '2024-01-15',
-      viewedDate: '2024-01-16',
-      validUntil: '2024-02-15',
-      services: [
-        { name: 'Maternity Photography', price: 25000 }
-      ],
-      addOns: []
-    },
-    {
-      id: '4',
-      proposalId: 'PROP-2024-004',
-      clientName: 'TechCorp Solutions',
-      clientEmail: 'events@techcorp.com',
-      leadId: 'LEAD-2024-004',
-      shootType: 'Corporate',
-      eventDate: '2024-03-20',
-      totalAmount: 85000,
-      status: 'Draft',
-      validUntil: '2024-03-20',
-      services: [
-        { name: 'Corporate Event Photography', price: 60000 },
-        { name: 'Team Headshots', price: 25000 }
-      ],
-      addOns: []
-    },
-    {
-      id: '5',
-      proposalId: 'PROP-2024-005',
-      clientName: 'Arjun Kumar',
-      clientEmail: 'arjun@email.com',
-      leadId: 'LEAD-2024-005',
-      shootType: 'Portrait',
-      eventDate: '2024-02-25',
-      totalAmount: 15000,
-      status: 'Rejected',
-      sentDate: '2024-01-10',
-      viewedDate: '2024-01-11',
-      responseDate: '2024-01-12',
-      validUntil: '2024-02-10',
-      services: [
-        { name: 'Portrait Session', price: 15000 }
-      ],
-      addOns: [],
-      notes: 'Client found pricing too high'
-    },
-    {
-      id: '6',
-      proposalId: 'PROP-2024-006',
-      clientName: 'Priya & Amit Sharma',
-      clientEmail: 'priya.amit@email.com',
-      leadId: 'LEAD-2024-006',
-      shootType: 'Wedding',
-      eventDate: '2024-04-15',
-      totalAmount: 150000,
-      status: 'Expired',
-      sentDate: '2024-01-05',
-      viewedDate: '2024-01-06',
-      validUntil: '2024-02-05',
-      services: [
-        { name: 'Wedding Photography', price: 100000 },
-        { name: 'Reception Coverage', price: 30000 }
-      ],
-      addOns: [
-        { name: 'Album Design', price: 20000 }
-      ]
+
+const [proposals, setProposals] = useState<Proposal[]>([]);
+const [loading, setLoading] = useState(true);
+useEffect(() => {
+  const fetchProposals = async () => {
+    try {
+      const response = await fetch('https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData');
+      const data = await response.json();
+
+      // Map backend fields to match your Proposal interface
+      const mapped: Proposal[] = data.map((item: any, index: number) => ({
+        id: index.toString(),
+        proposalId: item.proposalId,
+        clientName: item.clientName,
+        clientEmail: '', // Not available in response
+        leadId: item.leadId,
+        shootType: item.shootType,
+        eventDate: item.eventDate,
+        totalAmount: item.total || 0,
+        status: 'Sent', // Default fallback status
+        validUntil: item.validUntil || item.eventDate,
+        sentDate: item.timestamp,
+        services: item.services.map((s: any) => ({
+          name: s.title,
+          price: s.unitPrice * s.quantity
+        })),
+        addOns: item.addOns.filter((a: any) => a.selected).map((a: any) => ({
+          name: a.name,
+          price: a.price
+        })),
+        notes: item.notes || ''
+      }));
+
+      setProposals(mapped);
+    } catch (err) {
+      console.error('Error fetching proposals:', err);
+    } finally {
+      setLoading(false);
     }
-  ]);
+  };
+
+  fetchProposals();
+}, []);
 
   const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events'];
   const statusOptions = ['Draft', 'Sent', 'Viewed', 'Accepted', 'Rejected', 'Expired'];
@@ -503,7 +426,7 @@ function Proposals() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center space-x-2">
                             <button
-                              onClick={() => handleViewProposal(proposal.id)}
+                              onClick={() => handleViewProposal(proposal.proposalId)}
                               className="p-2 text-[#00BCEB] hover:text-[#00A5CF] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
                               title="View Proposal"
                             >

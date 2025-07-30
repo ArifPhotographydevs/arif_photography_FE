@@ -186,18 +186,58 @@ function ProposalCreate() {
     }
   };
 
-  const handleSendProposal = async () => {
-    setIsLoading(true);
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      navigate('/leads');
-    } catch (error) {
-      console.error('Failed to send proposal:', error);
-    } finally {
-      setIsLoading(false);
+const handleSendProposal = async () => {
+  setIsLoading(true);
+
+  try {
+    let base64Logo: string | undefined;
+    if (proposalData.logo) {
+      base64Logo = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(proposalData.logo!);
+      });
     }
-  };
+
+    const payload = {
+      leadId: leadId,
+      clientName: proposalData.clientName,
+      shootType: proposalData.shootType,
+      eventDate: proposalData.eventDate,
+      venue: proposalData.venue,
+      notes: proposalData.notes,
+      services: proposalData.services,
+      addOns: proposalData.addOns,
+      gstEnabled: proposalData.gstEnabled,
+      logos: base64Logo ? [base64Logo] : [],
+      termsTemplate: proposalData.termsTemplate,
+      footerNote: proposalData.footerNote,
+      subtotal: calculateSubtotal(),
+      total: calculateTotal()
+    };
+
+    const response = await fetch('https://cazwal3zzj.execute-api.eu-north-1.amazonaws.com/PostProposalData', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) throw new Error('Failed to send proposal');
+    
+    const result = await response.json();
+    console.log('Proposal created:', result);
+    navigate('/leads');
+
+  } catch (error) {
+    console.error('Error sending proposal:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const isStepValid = (step: number) => {
     switch (step) {
