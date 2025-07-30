@@ -32,6 +32,8 @@ function GalleryUpload() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadMessages, setUploadMessages] = useState<string[]>([]);
+
 
   // Settings
   const [settings, setSettings] = useState({
@@ -110,27 +112,59 @@ function GalleryUpload() {
     }));
   };
 
-  const handleUpload = async () => {
-    if (uploadedFiles.length === 0) return;
+ const handleUpload = async () => {
+  if (uploadedFiles.length === 0) return;
 
-    setIsUploading(true);
-    setUploadProgress(0);
+  setIsUploading(true);
+  setUploadProgress(0);
+  setUploadMessages([]);
 
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setIsUploading(false);
-            navigate('/gallery');
-          }, 1000);
-          return 100;
-        }
-        return prev + 10;
+  const folder = `projects/gallery/${projectId}`;
+  const fileNames = uploadedFiles.map(file => file.file.name);
+
+  try {
+    // Step 1: Request presigned URLs
+    const response = await fetch("https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files: fileNames, folder })
+    });
+
+    const result = await response.json();
+    if (!result.success || result.urls.length !== uploadedFiles.length) {
+      setUploadMessages(["❌ Error: Mismatch in URL count"]);
+      setIsUploading(false);
+      return;
+    }
+
+    // Step 2: Upload files in parallel
+    let completed = 0;
+    await Promise.all(uploadedFiles.map((fileObj, i) => {
+      const url = result.urls[i];
+      return fetch(url, {
+        method: "PUT",
+        body: fileObj.file
+      }).then(res => {
+        if (!res.ok) throw new Error(`Failed: ${fileObj.file.name}`);
+        completed++;
+        setUploadProgress(Math.round((completed / uploadedFiles.length) * 100));
+        setUploadMessages(prev => [...prev, `✅ ${fileObj.file.name} uploaded`]);
+      }).catch(err => {
+        setUploadMessages(prev => [...prev, `❌ ${fileObj.file.name} failed: ${err.message}`]);
       });
-    }, 200);
-  };
+    }));
+
+    setUploadMessages(prev => [...prev, `✅ Upload completed.`]);
+
+    // Optional: Auto redirect
+    setTimeout(() => navigate('/gallery'), 2000);
+  } catch (err: any) {
+    setUploadMessages([`❌ Error: ${err.message}`]);
+  } finally {
+    setIsUploading(false);
+  }
+};
+
 
   const isFormValid = () => {
     if (uploadedFiles.length === 0) return false;
@@ -219,10 +253,10 @@ function GalleryUpload() {
                 {/* Upload Progress */}
                 {isUploading && (
                   <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-[#2D2D2D]">Uploading...</span>
-                      <span className="text-sm text-gray-500">{uploadProgress}%</span>
-                    </div>
+                    <div className="text-right text-sm text-gray-500">
+  Uploading {uploadProgress}% of {uploadedFiles.length} file(s)
+</div>
+
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div
                         className="bg-[#00BCEB] h-2 rounded-full transition-all duration-300"
@@ -231,6 +265,16 @@ function GalleryUpload() {
                     </div>
                   </div>
                 )}
+                {uploadMessages.length > 0 && (
+  <div className="mt-4 space-y-1 text-sm">
+    {uploadMessages.map((msg, index) => (
+      <p key={index} className={msg.startsWith("✅") ? "text-green-600" : "text-red-600"}>
+        {msg}
+      </p>
+    ))}
+  </div>
+)}
+
               </div>
 
               {/* Uploaded Files Preview */}

@@ -45,28 +45,47 @@ function LeadDetail() {
   const [showWhatsAppToast, setShowWhatsAppToast] = useState(false);
 
   // Mock lead data - in real app, fetch from API
-  const [lead, setLead] = useState<Lead>({
-    id: '1',
-    name: 'Sarah Johnson',
-    email: 'sarah@email.com',
-    phone: '+91 98765 43210',
-    shootType: 'Wedding',
-    budget: 'High',
-    status: 'Follow-up',
-    eventDate: '2024-03-15',
-    notes: 'Outdoor wedding ceremony, prefers natural lighting. Venue: Goa Beach Resort.',
-    createdDate: '2024-01-15',
-    proposalStatus: 'Sent',
-    assignedTeam: [
-      { name: 'Arif Khan', role: 'Lead Photographer' },
-      { name: 'Priya Sharma', role: 'Assistant' }
-    ],
-    internalNotes: 'Client is very particular about timing. Follow up needed by end of week.'
-  });
+const [lead, setLead] = useState<Lead | null>(null);
 
-  useEffect(() => {
-    setInternalNotes(lead.internalNotes);
-  }, [lead.internalNotes]);
+useEffect(() => {
+  const fetchLead = async () => {
+    try {
+      const response = await fetch('https://sk8wa56suc.execute-api.eu-north-1.amazonaws.com/GetAllLeads');
+      const data = await response.json();
+
+      if (data.success && Array.isArray(data.leads)) {
+        const matchedLead = data.leads.find((l: any) => l.leadId === id);
+
+        if (matchedLead) {
+          const primaryEvent = matchedLead.eventDetails[0]; // Pick first event
+
+          const mappedLead: Lead = {
+            id: matchedLead.leadId,
+            name: `${matchedLead.personalInfo.brideName} & ${matchedLead.personalInfo.groomName}`,
+            email: matchedLead.personalInfo.email,
+            phone: matchedLead.personalInfo.phoneNumber,
+            shootType: matchedLead.selectedEvents.join(', '),
+            budget: 'Medium', // Placeholder (since API doesn't provide budget)
+            status: (matchedLead.status === 'new' ? 'New' : 'Follow-up') as Lead['status'], // Adjust mapping if needed
+            eventDate: primaryEvent?.date || '',
+            notes: primaryEvent?.notes || '',
+            createdDate: matchedLead.timestamp,
+            proposalStatus: 'Not Created',
+            assignedTeam: [],
+            internalNotes: ''
+          };
+
+          setLead(mappedLead);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching leads:', err);
+    }
+  };
+
+  fetchLead();
+}, [id]);
+
 
   const handleSaveNotes = () => {
     setLead(prev => ({ ...prev, internalNotes }));

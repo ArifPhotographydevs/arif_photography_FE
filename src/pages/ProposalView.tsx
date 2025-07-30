@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { 
   Calendar, 
   MapPin, 
@@ -51,42 +52,63 @@ function ProposalView() {
   const [revisionNotes, setRevisionNotes] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+    const [proposal, setProposal] = useState<ProposalData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const { id: proposalId } = useParams();   
 
   // Mock proposal data
-  const proposal: ProposalData = {
-    id: 'PROP-2024-001',
-    clientName: 'Sarah Johnson',
-    shootType: 'Wedding Photography',
-    eventDate: '2024-03-15',
-    venue: 'Goa Beach Resort',
-    services: [
-      {
-        title: 'Wedding Photography',
-        description: 'Full day wedding coverage with 2 photographers',
-        quantity: 1,
-        unitPrice: 50000
-      },
-      {
-        title: 'Pre-Wedding Shoot',
-        description: '4-hour outdoor session',
-        quantity: 1,
-        unitPrice: 25000
+useEffect(() => {
+  const fetchProposal = async () => {
+    try {
+      const response = await fetch('https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData');
+      const data = await response.json();
+
+      console.log("Fetched proposalId from URL:", proposalId);
+      console.log("API response:", data);
+
+      const proposals = Array.isArray(data) ? data : data.proposals || [];
+
+      const matched = proposals.find(
+        (item: any) => item.proposalId?.toString().trim() === proposalId?.toString().trim()
+      );
+
+      if (!matched) {
+        console.warn('No matching proposal found for proposalId:', proposalId);
       }
-    ],
-    addOns: [
-      { name: 'Drone Photography', price: 15000 },
-      { name: 'Highlight Reel', price: 35000 }
-    ],
-    gstEnabled: true,
-    customNotes: 'Looking forward to capturing your special day! We\'ll ensure every precious moment is beautifully documented.',
-    timeline: [
-      { phase: 'Pre-shoot Consultation', description: 'Discuss preferences and timeline', duration: '1 week before' },
-      { phase: 'Wedding Day Coverage', description: 'Full day photography coverage', duration: 'Event day' },
-      { phase: 'Photo Editing', description: 'Professional editing and retouching', duration: '2-3 weeks' },
-      { phase: 'Final Delivery', description: 'High-resolution photos and album', duration: '4 weeks' }
-    ],
-    status: 'pending'
+
+      if (matched) {
+        const mapped: ProposalData = {
+          id: matched.proposalId,
+          clientName: matched.clientName,
+          shootType: matched.shootType,
+          eventDate: matched.eventDate,
+          venue: matched.venue || '',
+          services: matched.services.map((s: any) => ({
+            title: s.title,
+            description: s.description || '',
+            quantity: s.quantity,
+            unitPrice: s.unitPrice
+          })),
+          addOns: matched.addOns
+            .filter((a: any) => a.selected)
+            .map((a: any) => ({ name: a.name, price: a.price })),
+          gstEnabled: matched.gstEnabled,
+          customNotes: matched.notes || '',
+          timeline: [], // You can fill this if available in API
+          status: 'pending'
+        };
+
+        setProposal(mapped);
+      }
+    } catch (error) {
+      console.error('Failed to fetch proposal:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  fetchProposal();
+}, [proposalId]);
 
   const portfolioImages = [
     'https://images.pexels.com/photos/1024993/pexels-photo-1024993.jpeg?auto=compress&cs=tinysrgb&w=400',
@@ -171,7 +193,16 @@ function ProposalView() {
     }
   };
 
-  return (
+if (loading) {
+  return <div className="text-center p-10 text-gray-500">Loading proposal...</div>;
+}
+
+if (!proposal) {
+  return <div className="text-center p-10 text-red-500">Proposal not found.</div>;
+}
+
+return (
+
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200 p-4">
