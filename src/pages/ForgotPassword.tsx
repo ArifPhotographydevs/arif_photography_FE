@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { User, Loader2 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 import { getAnalytics, logEvent, isSupported } from 'firebase/analytics';
 
 // Firebase configuration
@@ -29,24 +29,21 @@ isSupported().then((supported) => {
 
 interface FormData {
   email: string;
-  password: string;
 }
 
 interface FormErrors {
   email?: string;
-  password?: string;
   firebase?: string;
 }
 
-function Login() {
+function ForgotPassword() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<FormData>({
-    email: '',
-    password: ''
+    email: ''
   });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -60,10 +57,6 @@ function Login() {
       newErrors.email = 'Email is required';
     } else if (!validateEmail(formData.email)) {
       newErrors.email = 'Please enter a valid email address';
-    }
-
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
     }
 
     return newErrors;
@@ -83,12 +76,16 @@ function Login() {
         firebase: undefined
       }));
     }
+    // Clear success message when user starts typing
+    if (successMessage) {
+      setSuccessMessage('');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate form and set errors
+    // Validate form
     const validationErrors = validateForm();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -97,51 +94,38 @@ function Login() {
 
     setIsLoading(true);
     setErrors({});
+    setSuccessMessage('');
 
     try {
-      // Sign in with Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
-      );
+      // Send password reset email
+      await sendPasswordResetEmail(auth, formData.email);
 
-      // Check if email is verified
-      if (!userCredential.user.emailVerified) {
-        setErrors({ firebase: 'Please verify your email before logging in.' });
-        await auth.signOut();
-        return;
-      }
-
-      // Log login event to Firebase Analytics if available
+      // Log password reset event to Firebase Analytics if available
       if (analytics) {
-        logEvent(analytics, 'login', {
+        logEvent(analytics, 'password_reset', {
           method: 'email'
         });
       }
 
-      // Redirect to dashboard
-      navigate('/dashboard');
+      // Show success message
+      setSuccessMessage('Password reset email sent. Please check your inbox.');
+      setFormData({ email: '' });
     } catch (error: any) {
-      console.error('Login failed:', error);
-      let errorMessage = 'An error occurred during login';
+      console.error('Password reset failed:', error);
+      let errorMessage = 'An error occurred while sending the reset email';
 
       switch (error.code) {
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-          errorMessage = 'Invalid credentials. Please try again.';
-          break;
         case 'auth/invalid-email':
           errorMessage = 'Invalid email address';
           break;
-        case 'auth/too-many-requests':
-          errorMessage = 'Too many login attempts. Please try again later.';
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email';
           break;
-        case 'auth/user-disabled':
-          errorMessage = 'This account has been disabled';
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many requests. Please try again later.';
           break;
         default:
-          errorMessage = error.message || 'An error occurred during login';
+          errorMessage = error.message || 'An error occurred while sending the reset email';
       }
 
       setErrors({ firebase: errorMessage });
@@ -150,14 +134,9 @@ function Login() {
     }
   };
 
-  const handleForgotPassword = () => {
-    console.log('Forgot Password button clicked, navigating to /forgot-password');
-    navigate('/forgot-password');
-  };
-
-  const handleSignupClick = () => {
-    console.log('Sign Up button clicked, navigating to /signup');
-    navigate('/signup');
+  const handleBackToLogin = () => {
+    console.log('Back to Login button clicked, navigating to /login');
+    navigate('/login');
   };
 
   return (
@@ -169,9 +148,16 @@ function Login() {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#00BCEB] to-[#00A5CF] rounded-full mb-4">
               <span className="text-white font-bold text-xl">A</span>
             </div>
-            <h1 className="text-3xl font-bold text-[#00BCEB] mb-2">Arif</h1>
-            <p className="text-[#2D2D2D] text-lg">Welcome back to Arif CRM</p>
+            <h1 className="text-3xl font-bold text-[#00BCEB] mb-2">Reset Password</h1>
+            <p className="text-[#2D2D2D] text-lg">Enter your email to receive a password reset link</p>
           </div>
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="mb-4 p-3 bg-green-100 border border-green-300 rounded-lg text-green-700">
+              {successMessage}
+            </div>
+          )}
 
           {/* Firebase Error */}
           {errors.firebase && (
@@ -209,52 +195,7 @@ function Login() {
               )}
             </div>
 
-            {/* Password Field */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-[#2D2D2D] mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className={`block w-full pl-10 pr-12 py-3 bg-[#F5F7FA] border rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200 ${
-                    errors.password ? 'border-red-300' : 'border-gray-200'
-                  }`}
-                  placeholder="Enter your password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="mt-1 text-sm text-red-500">{errors.password}</p>
-              )}
-            </div>
-
-            {/* Forgot Password Link */}
-            <div className="text-right">
-              <button
-                type="button"
-                onClick={handleForgotPassword}
-                className="text-[#FF6B00] hover:text-[#e55a00] text-sm font-medium transition-colors duration-200"
-              >
-                Forgot Password?
-              </button>
-            </div>
-
-            {/* Login Button */}
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={Object.keys(validateForm()).length > 0 || isLoading}
@@ -267,24 +208,24 @@ function Login() {
               {isLoading ? (
                 <>
                   <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5" />
-                  Logging in...
+                  Sending Reset Email...
                 </>
               ) : (
-                'Login'
+                'Send Reset Email'
               )}
             </button>
           </form>
 
-          {/* Sign Up Link */}
+          {/* Back to Login Link */}
           <div className="mt-8 text-center">
             <p className="text-[#2D2D2D]">
-              Don't have an account?{' '}
+              Remember your password?{' '}
               <button
                 type="button"
-                onClick={handleSignupClick}
+                onClick={handleBackToLogin}
                 className="text-[#FF6B00] hover:text-[#e55a00] font-medium transition-colors duration-200"
               >
-                Sign Up
+                Back to Login
               </button>
             </p>
           </div>
@@ -294,4 +235,4 @@ function Login() {
   );
 }
 
-export default Login;
+export default ForgotPassword;

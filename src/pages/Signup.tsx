@@ -1,6 +1,31 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Mail, Phone, Lock, Building2, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from 'firebase/auth';
+import { getAnalytics, logEvent, isSupported } from 'firebase/analytics';
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAVfur9ihXl8pRZwojTY-KPbyKvhAj2br4",
+  authDomain: "arif-d49f9.firebaseapp.com",
+  projectId: "arif-d49f9",
+  storageBucket: "arif-d49f9.firebasestorage.app",
+  messagingSenderId: "83214662234",
+  appId: "1:83214662234:web:1ad3986dfcbc7a20447663",
+  measurementId: "G-EPTJ3RLEV0"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+// Initialize Analytics only if supported
+let analytics = null;
+isSupported().then((supported) => {
+  if (supported) {
+    analytics = getAnalytics(app);
+  }
+});
 
 interface FormData {
   fullName: string;
@@ -18,6 +43,7 @@ interface FormErrors {
   password?: string;
   confirmPassword?: string;
   studioName?: string;
+  firebase?: string;
 }
 
 function Signup() {
@@ -90,11 +116,11 @@ function Signup() {
       [name]: value
     }));
 
-    // Clear specific field error when user starts typing
     if (errors[name as keyof FormErrors]) {
       setErrors(prev => ({
         ...prev,
-        [name]: undefined
+        [name]: undefined,
+        firebase: undefined
       }));
     }
   };
@@ -118,19 +144,59 @@ function Signup() {
     setErrors({});
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Navigate to onboarding page
+      // Create user with Firebase Authentication
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+
+      // Update user profile with full name
+      await updateProfile(userCredential.user, {
+        displayName: formData.fullName
+      });
+
+      // Send email verification
+      await sendEmailVerification(userCredential.user);
+
+      // Log signup event to Firebase Analytics if available
+      if (analytics) {
+        logEvent(analytics, 'sign_up', {
+          method: 'email',
+          studio_name: formData.studioName
+        });
+      }
+
       navigate('/onboarding');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Signup failed:', error);
+      let errorMessage = 'An error occurred during signup';
+      
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          errorMessage = 'This email is already registered';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password is too weak';
+          break;
+        case 'auth/operation-not-allowed':
+          errorMessage = 'Email/password accounts are not enabled';
+          break;
+        default:
+          errorMessage = error.message || 'An error occurred during signup';
+      }
+      
+      setErrors({ firebase: errorMessage });
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleLoginClick = () => {
+    console.log('Login button clicked, navigating to /login');
     navigate('/login');
   };
 
@@ -146,6 +212,13 @@ function Signup() {
             <h1 className="text-3xl font-bold text-[#2D2D2D] mb-2">Create your studio account</h1>
             <p className="text-gray-600">Join Arif CRM and manage your shoots with ease.</p>
           </div>
+
+          {/* Firebase Error */}
+          {errors.firebase && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700">
+              {errors.firebase}
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
