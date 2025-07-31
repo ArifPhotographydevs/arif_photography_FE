@@ -1,5 +1,31 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getAuth, signOut } from 'firebase/auth';
+import { getAnalytics, logEvent, isSupported } from 'firebase/analytics';
 import { Bell, User, LogOut } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+
+// Firebase configuration (should ideally be in a separate file or .env)
+const firebaseConfig = {
+  apiKey:  "AIzaSyAVfur9ihXl8pRZwojTY-KPbyKvhAj2br4",
+  authDomain: "arif-d49f9.firebaseapp.com",
+  projectId:  "arif-d49f9",
+  storageBucket:  "arif-d49f9.firebasestorage.app",
+  messagingSenderId: "83214662234",
+  appId: "1:83214662234:web:1ad3986dfcbc7a20447663",
+  measurementId: "G-EPTJ3RLEV0"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+// Initialize Analytics only if supported
+let analytics = null;
+isSupported().then((supported) => {
+  if (supported) {
+    analytics = getAnalytics(app);
+  }
+});
 
 interface HeaderProps {
   title: string;
@@ -7,18 +33,37 @@ interface HeaderProps {
 }
 
 function Header({ title, sidebarCollapsed }: HeaderProps) {
+  const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  const handleLogout = async () => {
+    try {
+      console.log('Logout button clicked, signing out');
+      await signOut(auth);
+      console.log('User signed out successfully');
+      if (analytics) {
+        logEvent(analytics, 'logout', { method: 'email' });
+      }
+      navigate('/login');
+    } catch (error: any) {
+      console.error('Logout failed:', error.code, error.message);
+    }
+    setShowProfileMenu(false); // Close profile menu after logout
+  };
+
   return (
-    <header className="fixed top-0 right-0 bg-white shadow-sm border-b border-gray-200 z-40 transition-all duration-300 ease-in-out" style={{
-      left: sidebarCollapsed ? '64px' : '256px'
-    }}>
+    <header
+      className="fixed top-0 right-0 bg-white shadow-sm border-b border-gray-200 z-40 transition-all duration-300 ease-in-out"
+      style={{
+        left: sidebarCollapsed ? '64px' : '256px'
+      }}
+    >
       <div className="flex items-center justify-between h-16 px-6">
         <div className="flex items-center">
           <h1 className="text-2xl font-bold text-[#2D2D2D]">{title}</h1>
         </div>
-        
+
         <div className="flex items-center space-x-4">
           {/* Notifications */}
           <div className="relative">
@@ -67,14 +112,23 @@ function Header({ title, sidebarCollapsed }: HeaderProps) {
             {showProfileMenu && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
                 <div className="p-2">
-                  <a href="/profile" className="block px-4 py-2 text-sm text-[#2D2D2D] hover:bg-gray-100 rounded">
+                  <a
+                    href="/profile"
+                    className="block px-4 py-2 text-sm text-[#2D2D2D] hover:bg-gray-100 rounded"
+                  >
                     Profile
                   </a>
-                  <a href="/settings" className="block px-4 py-2 text-sm text-[#2D2D2D] hover:bg-gray-100 rounded">
+                  <a
+                    href="/settings"
+                    className="block px-4 py-2 text-sm text-[#2D2D2D] hover:bg-gray-100 rounded"
+                  >
                     Settings
                   </a>
                   <hr className="my-2" />
-                  <button className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded flex items-center">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded flex items-center"
+                  >
                     <LogOut className="h-4 w-4 mr-2" />
                     Logout
                   </button>

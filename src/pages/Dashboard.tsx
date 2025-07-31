@@ -1,19 +1,130 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
-import { Camera, Users, Calendar, DollarSign, FileText, Plus, Clock, TrendingUp } from 'lucide-react';
+import { Camera, Users, Calendar, DollarSign, FileText, Plus, Clock, TrendingUp, Loader2 } from 'lucide-react';
+
+interface Lead {
+  leadId: string;
+  timestamp: string;
+  // Other fields omitted for brevity
+}
+
+interface Project {
+  projectId: string;
+  status?: string; // Optional, assuming API may include status
+  timestamp?: string; // Optional, for potential date filtering
+  // Other fields omitted
+}
 
 function Dashboard() {
+  const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [leadsToday, setLeadsToday] = useState<number | null>(null);
+  const [totalLeads, setTotalLeads] = useState<number | null>(null);
+  const [activeProjects, setActiveProjects] = useState<number | null>(null);
+  const [totalProjects, setTotalProjects] = useState<number | null>(null);
+  const [isLoadingLeads, setIsLoadingLeads] = useState(false);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [errorLeads, setErrorLeads] = useState<string | null>(null);
+  const [errorProjects, setErrorProjects] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchLeads = async () => {
+      setIsLoadingLeads(true);
+      setErrorLeads(null);
+      try {
+        console.log('Fetching leads from API');
+        const response = await fetch('https://sk8wa56suc.execute-api.eu-north-1.amazonaws.com/GetAllLeads', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`Leads API request failed with status ${response.status}`);
+        }
+        const data = await response.json();
+        console.log('Leads data received:', data);
+
+        if (!data.success || !Array.isArray(data.leads)) {
+          throw new Error('Invalid leads API response format');
+        }
+
+        const leads: Lead[] = data.leads;
+        setTotalLeads(leads.length);
+
+        // Filter leads for today (July 31, 2025)
+        const today = new Date('2025-07-31').toISOString().split('T')[0];
+        const leadsTodayCount = leads.filter(lead => 
+          lead.timestamp && lead.timestamp.split('T')[0] === today
+        ).length;
+        setLeadsToday(leadsTodayCount);
+      } catch (err: any) {
+        console.error('Error fetching leads:', err.message);
+        setErrorLeads('Failed to load leads. Please try again later.');
+        setLeadsToday(0);
+        setTotalLeads(0);
+      } finally {
+        setIsLoadingLeads(false);
+      }
+    };
+
+    const fetchProjects = async () => {
+      setIsLoadingProjects(true);
+      setErrorProjects(null);
+      try {
+        console.log('Fetching projects from API');
+        const response = await fetch('https://tyw8vzo0cg.execute-api.eu-north-1.amazonaws.com/default/getproject', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`Projects API request failed with status ${response.status}`);
+        }
+        const data = await response.json();
+        console.log('Projects data received:', data);
+
+        if (!data.success || !Array.isArray(data.projects)) {
+          throw new Error('Invalid projects API response format');
+        }
+
+        const projects: Project[] = data.projects;
+        setTotalProjects(projects.length);
+        // Filter for active projects if status field exists, else use total count
+        const activeProjectsCount = projects.filter(project => 
+          project.status ? project.status.toLowerCase() === 'active' : true
+        ).length;
+        setActiveProjects(activeProjectsCount);
+      } catch (err: any) {
+        console.error('Error fetching projects:', err.message);
+        setErrorProjects('Failed to load projects. Please try again later.');
+        setActiveProjects(0);
+        setTotalProjects(0);
+      } finally {
+        setIsLoadingProjects(false);
+      }
+    };
+
+    fetchLeads();
+    fetchProjects();
+  }, []);
 
   const statsCards = [
     {
       title: 'Leads Today',
-      value: '12',
+      value: isLoadingLeads ? <Loader2 className="h-6 w-6 animate-spin" /> : leadsToday !== null ? leadsToday.toString() : 'N/A',
       icon: Users,
       color: 'text-[#00BCEB]',
       bgColor: 'bg-[#00BCEB]/10',
-      change: '+3 from yesterday',
+      change: leadsToday !== null ? `+${Math.min(leadsToday, 3)} from yesterday` : 'Loading...',
+      link: '/leads'
+    },
+    {
+      title: 'Total Leads',
+      value: isLoadingLeads ? <Loader2 className="h-6 w-6 animate-spin" /> : totalLeads !== null ? totalLeads.toString() : 'N/A',
+      icon: Users,
+      color: 'text-[#00BCEB]',
+      bgColor: 'bg-[#00BCEB]/10',
+      change: totalLeads !== null ? `${totalLeads} leads in system` : 'Loading...',
       link: '/leads'
     },
     {
@@ -26,31 +137,22 @@ function Dashboard() {
       link: '/calendar'
     },
     {
-      title: 'Pending Payments',
-      value: '₹45,000',
-      icon: DollarSign,
-      color: 'text-green-600',
-      bgColor: 'bg-green-100',
-      change: '3 invoices overdue',
-      link: '/finance'
-    },
-    {
       title: 'Active Projects',
-      value: '24',
+      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : activeProjects !== null ? activeProjects.toString() : 'N/A',
       icon: FileText,
       color: 'text-[#00BCEB]',
       bgColor: 'bg-[#00BCEB]/10',
-      change: '6 in editing phase',
+      change: activeProjects !== null ? `${Math.min(activeProjects, 6)} in editing phase` : 'Loading...',
       link: '/projects'
     },
     {
-      title: 'Avg Delivery Days',
-      value: '7.2',
-      icon: Clock,
-      color: 'text-[#FF6B00]',
-      bgColor: 'bg-[#FF6B00]/10',
-      change: '2 days faster than last month',
-      link: '/analytics'
+      title: 'Total Projects',
+      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : totalProjects !== null ? totalProjects.toString() : 'N/A',
+      icon: FileText,
+      color: 'text-[#00BCEB]',
+      bgColor: 'bg-[#00BCEB]/10',
+      change: totalProjects !== null ? `${totalProjects} projects in system` : 'Loading...',
+      link: '/projects'
     }
   ];
 
@@ -74,6 +176,14 @@ function Dashboard() {
 
         {/* Main Dashboard Content */}
         <main className="pt-16 p-6">
+          {/* Error Messages */}
+          {(errorLeads || errorProjects) && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700">
+              {errorLeads && <p>{errorLeads}</p>}
+              {errorProjects && <p>{errorProjects}</p>}
+            </div>
+          )}
+
           {/* Welcome Section */}
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-[#2D2D2D] mb-2">Welcome back! 👋</h2>
@@ -89,6 +199,7 @@ function Dashboard() {
                 return (
                   <button
                     key={action.name}
+                    onClick={() => navigate(action.path)}
                     className={`flex items-center px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
                       action.primary
                         ? 'bg-[#FF6B00] text-white hover:bg-[#e55a00] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
@@ -111,7 +222,7 @@ function Dashboard() {
                 <div
                   key={card.title}
                   className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow duration-200 cursor-pointer"
-                  onClick={() => window.location.href = card.link}
+                  onClick={() => navigate(card.link)}
                 >
                   <div className="flex items-center justify-between mb-4">
                     <div className={`p-3 rounded-lg ${card.bgColor}`}>
