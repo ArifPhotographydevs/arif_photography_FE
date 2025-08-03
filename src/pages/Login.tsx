@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, Loader2, Check, AlertCircle } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { getAnalytics, logEvent, isSupported } from 'firebase/analytics';
@@ -47,6 +47,9 @@ function Login() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -75,7 +78,6 @@ function Login() {
       ...prev,
       [name]: value
     }));
-    // Clear specific field error when user starts typing
     if (errors[name as keyof FormErrors] || errors.firebase) {
       setErrors(prev => ({
         ...prev,
@@ -85,13 +87,20 @@ function Login() {
     }
   };
 
+  const showToastMessage = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate form and set errors
     const validationErrors = validateForm();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
+      showToastMessage(Object.values(validationErrors)[0], 'error');
       return;
     }
 
@@ -99,28 +108,19 @@ function Login() {
     setErrors({});
 
     try {
-      // Sign in with Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(
+      await signInWithEmailAndPassword(
         auth,
         formData.email,
         formData.password
       );
 
-      // Check if email is verified
-      if (!userCredential.user.emailVerified) {
-        setErrors({ firebase: 'Please verify your email before logging in.' });
-        await auth.signOut();
-        return;
-      }
-
-      // Log login event to Firebase Analytics if available
       if (analytics) {
         logEvent(analytics, 'login', {
           method: 'email'
         });
       }
 
-      // Redirect to dashboard
+      showToastMessage('Login successful!');
       navigate('/dashboard');
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -145,6 +145,7 @@ function Login() {
       }
 
       setErrors({ firebase: errorMessage });
+      showToastMessage(errorMessage, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -175,8 +176,9 @@ function Login() {
 
           {/* Firebase Error */}
           {errors.firebase && (
-            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700">
-              {errors.firebase}
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 flex items-center">
+              <AlertCircle className="h-5 w-5 mr-2" />
+              <span>{errors.firebase}</span>
             </div>
           )}
 
@@ -290,6 +292,22 @@ function Login() {
           </div>
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {showToast && (
+        <div className={`fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in ${
+          toastType === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+        }`}>
+          <div className="flex items-center">
+            {toastType === 'success' ? (
+              <Check className="h-4 w-4 mr-2" />
+            ) : (
+              <AlertCircle className="h-4 w-4 mr-2" />
+            )}
+            <p className="font-medium">{toastMessage}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

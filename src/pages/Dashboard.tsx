@@ -3,6 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
 import { Camera, Users, Calendar, DollarSign, FileText, Plus, Clock, TrendingUp, Loader2 } from 'lucide-react';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { initializeApp } from 'firebase/app';
+import axios from 'axios';
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAVfur9ihXl8pRZwojTY-KPbyKvhAj2br4",
+  authDomain: "arif-d49f9.firebaseapp.com",
+  projectId: "arif-d49f9",
+  storageBucket: "arif-d49f9.firebasestorage.app",
+  messagingSenderId: "83214662234",
+  appId: "1:83214662234:web:1ad3986dfcbc7a20447663",
+  measurementId: "G-EPTJ3RLEV0"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 
 interface Lead {
   leadId: string;
@@ -17,6 +35,15 @@ interface Project {
   // Other fields omitted
 }
 
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: 'Admin' | 'Employee';
+  lastLogin: string;
+  status: 'Active' | 'Pending' | 'Inactive';
+}
+
 function Dashboard() {
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -28,6 +55,8 @@ function Dashboard() {
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [errorLeads, setErrorLeads] = useState<string | null>(null);
   const [errorProjects, setErrorProjects] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
   useEffect(() => {
     const fetchLeads = async () => {
@@ -52,8 +81,8 @@ function Dashboard() {
         const leads: Lead[] = data.leads;
         setTotalLeads(leads.length);
 
-        // Filter leads for today (July 31, 2025)
-        const today = new Date('2025-07-31').toISOString().split('T')[0];
+        // Filter leads for today (August 03, 2025)
+        const today = new Date('2025-08-03').toISOString().split('T')[0];
         const leadsTodayCount = leads.filter(lead => 
           lead.timestamp && lead.timestamp.split('T')[0] === today
         ).length;
@@ -104,8 +133,47 @@ function Dashboard() {
       }
     };
 
+    const fetchTeamMembers = async () => {
+      try {
+        const response = await axios.get('https://w8jbbb972a.execute-api.eu-north-1.amazonaws.com/default/get_team_members');
+        if (response.data.members) {
+          const members: TeamMember[] = response.data.members.map(member => ({
+            id: member.uid,
+            name: member.name,
+            email: member.email,
+            role: member.role,
+            lastLogin: member.last_login || 'Never',
+            status: member.status || 'Pending'
+          }));
+          setTeamMembers(members);
+
+          // Set userName based on the current user's ID
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const currentMember = members.find(m => m.id === currentUser.uid);
+            if (currentMember) {
+              setUserName(currentMember.name);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching team members:', error);
+      }
+    };
+
     fetchLeads();
     fetchProjects();
+    fetchTeamMembers();
+
+    // Keep auth listener for initial setup or fallback
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('Auth state changed:', user?.displayName);
+      if (user && !userName) { // Only set if not already set by API
+        setUserName(user.displayName);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const statsCards = [
@@ -186,7 +254,7 @@ function Dashboard() {
 
           {/* Welcome Section */}
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-[#2D2D2D] mb-2">Welcome back! 👋</h2>
+            <h2 className="text-3xl font-bold text-[#2D2D2D] mb-2">Welcome back{userName ? `, ${userName}!` : '!'} 👋</h2>
             <p className="text-gray-600 text-lg">Here's what's happening with your photography business today.</p>
           </div>
 
