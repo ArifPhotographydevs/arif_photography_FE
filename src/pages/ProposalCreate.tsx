@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import emailjs from '@emailjs/browser';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -32,7 +33,7 @@ interface Service {
 }
 
 interface AddOn {
-  id: string;
+  id:string;
   name: string;
   price: number;
   selected: boolean;
@@ -40,6 +41,7 @@ interface AddOn {
 
 interface ProposalData {
   clientName: string;
+  recipientEmail: string; 
   shootType: string;
   eventDate: string;
   venue: string;
@@ -65,9 +67,9 @@ function ProposalCreate() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Initialize state with empty/default values from the original UI
   const [proposalData, setProposalData] = useState<ProposalData>({
     clientName: '', 
+    recipientEmail: '',
     shootType: '',
     eventDate: '',
     venue: '',
@@ -88,7 +90,7 @@ function ProposalCreate() {
     footerNote: ''
   });
 
-  // --- DATA FETCHING ---
+  // --- DATA FETCHING (No Changes) ---
   useEffect(() => {
     const fetchLeadData = async () => {
       if (!leadId) {
@@ -115,12 +117,14 @@ function ProposalCreate() {
             const clientName = `${matchedLead.personalInfo.brideName} & ${matchedLead.personalInfo.groomName}`;
             const shootType = matchedLead.selectedEvents.join(', ');
             const eventDate = primaryEvent?.date ? new Date(primaryEvent.date).toISOString().split('T')[0] : '';
+            const recipientEmail = matchedLead.personalInfo.email || ''; 
 
             setProposalData(prevData => ({
               ...prevData,
               clientName,
               shootType,
               eventDate,
+              recipientEmail,
             }));
           } else {
             setError(`The lead with ID "${leadId}" could not be found.`);
@@ -139,7 +143,7 @@ function ProposalCreate() {
     fetchLeadData();
   }, [leadId]);
 
-  // --- WIZARD AND FORM CONFIG ---
+  // --- WIZARD AND FORM CONFIG (No Changes) ---
   const steps = [
     { number: 1, title: 'Basic Info', completed: false },
     { number: 2, title: 'Package Builder', completed: false },
@@ -154,11 +158,10 @@ function ProposalCreate() {
     { value: 'custom', label: 'Custom Terms' }
   ];
 
-  // --- HANDLER FUNCTIONS ---
+  // --- HANDLER FUNCTIONS (No Changes) ---
   const handleInputChange = (field: keyof ProposalData, value: any) => {
     setProposalData(prev => ({ ...prev, [field]: value }));
   };
-
   const handleServiceChange = (serviceId: string, field: keyof Service, value: any) => {
     setProposalData(prev => ({
       ...prev,
@@ -167,7 +170,6 @@ function ProposalCreate() {
       )
     }));
   };
-
   const addService = () => {
     const newService: Service = {
       id: Date.now().toString(),
@@ -178,14 +180,12 @@ function ProposalCreate() {
     };
     setProposalData(prev => ({ ...prev, services: [...prev.services, newService] }));
   };
-
   const removeService = (serviceId: string) => {
     setProposalData(prev => ({
       ...prev,
       services: prev.services.filter(service => service.id !== serviceId)
     }));
   };
-
   const toggleAddOn = (addOnId: string) => {
     setProposalData(prev => ({
       ...prev,
@@ -194,7 +194,6 @@ function ProposalCreate() {
       )
     }));
   };
-
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -204,25 +203,29 @@ function ProposalCreate() {
       reader.readAsDataURL(file);
     }
   };
-
   const calculateSubtotal = () => {
     const servicesTotal = proposalData.services.reduce((total, service) => total + (service.quantity * service.unitPrice), 0);
-    const addOnsTotal = proposalData.addOns.filter(addOn => addOn.selected).reduce((total, addOn) => total + addOn.price, 0);
     return servicesTotal;
   };
-
   const calculateTotal = () => {
     const subtotal = calculateSubtotal();
     const gstAmount = proposalData.gstEnabled ? subtotal * 0.18 : 0;
     return subtotal + gstAmount;
   };
-
   const nextStep = () => currentStep < 4 && setCurrentStep(currentStep + 1);
   const prevStep = () => currentStep > 1 && setCurrentStep(currentStep - 1);
 
+  // --- MODIFICATION: Updated proposal submission and email sending logic ---
   const handleSendProposal = async () => {
+    // Add validation to prevent sending if email is missing
+    if (!proposalData.recipientEmail) {
+      alert("Cannot send proposal: The recipient's email address is missing.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      // --- Step 1: Post the proposal data (same as before) ---
       let base64Logo: string | undefined;
       if (proposalData.logo) {
         base64Logo = await new Promise<string>((resolve, reject) => {
@@ -236,24 +239,55 @@ function ProposalCreate() {
       const payload = {
         ...proposalData,
         leadId: leadId,
-        logo: undefined, // Remove file object
+        logo: undefined,
         logos: base64Logo ? [base64Logo] : [],
         subtotal: calculateSubtotal(),
         total: calculateTotal()
       };
-
+      
       const response = await fetch('https://cazwal3zzj.execute-api.eu-north-1.amazonaws.com/PostProposalData', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error('Failed to send proposal.');
+      const result = await response.json();
+
+      // --- FIX: This condition now correctly checks the API response ---
+      if (!response.ok || !result.proposalId) {
+        throw new Error(result.message || 'Failed to save proposal or did not receive a proposal ID.');
+      }
       
-      alert('Proposal sent successfully!');
+      const newProposalId = result.proposalId;
+      console.log(`Proposal created successfully with ID: ${newProposalId}`);
+      
+      // --- Step 2: Send email using EmailJS ---
+      const proposalLink = `http://localhost:5173/proposals/view/${newProposalId}`;
+      
+      // --- FIX: Match these variable names to your EmailJS template ---
+      const templateParams = {
+        name: proposalData.clientName,
+        email: proposalData.recipientEmail,
+        proposal_link: proposalLink,
+      };
+
+      const serviceID = 'service_4gpl8ci';
+      const templateID = 'template_bjxhrw1';
+      const publicKey = '39AyrK7G49ZmG07g7';
+
+      try {
+        await emailjs.send(serviceID, templateID, templateParams, publicKey);
+        alert('Proposal sent successfully!');
+      } catch (emailError: any) {
+        console.error('Proposal was saved, but failed to send email:', emailError);
+        alert(`Proposal was created (ID: ${newProposalId}), but the email failed. Please send the link manually: ${proposalLink}`);
+      }
+
+      // --- Step 3: Navigate to the lead details page ---
       navigate(`/leads/${leadId}`);
 
-    } catch (error: any) {
+    } catch (error: any)
+     {
       console.error('Error sending proposal:', error);
       alert(`Error: ${error.message}`);
     } finally {
@@ -270,7 +304,7 @@ function ProposalCreate() {
     }
   };
 
-  // --- RENDER LOGIC ---
+  // --- RENDER LOGIC (No changes below this line) ---
   if (loading) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50">
@@ -316,6 +350,7 @@ function ProposalCreate() {
           </button>
 
           <div className="max-w-4xl mx-auto">
+            {/* ... rest of the JSX is unchanged ... */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
               <h1 className="text-2xl font-bold text-[#2D2D2D] mb-4">Create New Proposal</h1>
               <div className="flex items-center space-x-4">
@@ -336,7 +371,7 @@ function ProposalCreate() {
               {currentStep === 1 && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Basic Information</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                     <div>
                       <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Client Name</label>
                       <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-4 w-4 text-gray-400" /></div><input type="text" value={proposalData.clientName} readOnly className="w-full pl-10 pr-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-[#2D2D2D] cursor-not-allowed"/></div>
@@ -348,6 +383,21 @@ function ProposalCreate() {
                     <div>
                       <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Event Date</label>
                       <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Calendar className="h-4 w-4 text-gray-400" /></div><input type="date" value={proposalData.eventDate} readOnly className="w-full pl-10 pr-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-[#2D2D2D] cursor-not-allowed"/></div>
+                    </div>
+                    {/* --- MODIFICATION: Display email or warning --- */}
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Recipient Email</label>
+                      {proposalData.recipientEmail ? (
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Send className="h-4 w-4 text-gray-400" /></div>
+                          <input type="text" value={proposalData.recipientEmail} readOnly className="w-full pl-10 pr-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-[#2D2D2D] cursor-not-allowed"/>
+                        </div>
+                      ) : (
+                        <div className="flex items-center p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+                          <AlertCircle className="h-5 w-5 mr-3 flex-shrink-0" />
+                          <span>No email address found for this lead. The proposal can be created, but it cannot be sent.</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -438,7 +488,25 @@ function ProposalCreate() {
               {/* --- NAVIGATION BUTTONS --- */}
               <div className="flex items-center justify-between pt-6 border-t border-gray-200">
                 <button onClick={prevStep} disabled={currentStep === 1} className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors duration-200 ${currentStep === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-[#2D2D2D] hover:bg-gray-200'}`}><ArrowLeft className="h-4 w-4 mr-2" />Previous</button>
-                {currentStep < 4 ? (<button onClick={nextStep} disabled={!isStepValid(currentStep)} className={`flex items-center px-6 py-2 rounded-lg font-medium transition-all duration-200 ${isStepValid(currentStep) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>Next<ArrowRight className="h-4 w-4 ml-2" /></button>) : (<div className="flex items-center space-x-3"><button onClick={() => setCurrentStep(3)} className="px-4 py-2 bg-gray-100 text-[#2D2D2D] rounded-lg font-medium hover:bg-gray-200 transition-colors duration-200">Go Back</button><button onClick={handleSendProposal} disabled={isSubmitting} className={`flex items-center px-6 py-2 rounded-lg font-medium transition-all duration-200 ${!isSubmitting ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>{isSubmitting ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Sending...</>) : (<><Send className="h-4 w-4 mr-2" />Send Proposal</>)}</button></div>)}
+                {currentStep < 4 ? (
+                  <button onClick={nextStep} disabled={!isStepValid(currentStep)} className={`flex items-center px-6 py-2 rounded-lg font-medium transition-all duration-200 ${isStepValid(currentStep) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>Next<ArrowRight className="h-4 w-4 ml-2" /></button>
+                ) : (
+                  <div className="flex items-center space-x-3">
+                    <button onClick={() => setCurrentStep(3)} className="px-4 py-2 bg-gray-100 text-[#2D2D2D] rounded-lg font-medium hover:bg-gray-200 transition-colors duration-200">Go Back</button>
+                    <button 
+                      onClick={handleSendProposal} 
+                      disabled={isSubmitting || !proposalData.recipientEmail}
+                      title={!proposalData.recipientEmail ? "Cannot send proposal: Recipient email is missing." : "Send Proposal"}
+                      className={`flex items-center px-6 py-2 rounded-lg font-medium transition-all duration-200 ${(!isSubmitting && proposalData.recipientEmail) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                    >
+                      {isSubmitting ? (
+                        <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Sending...</>
+                      ) : (
+                        <><Send className="h-4 w-4 mr-2" />Send Proposal</>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
