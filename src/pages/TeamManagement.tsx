@@ -20,7 +20,7 @@ import {
   Lock
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, updatePassword, signInWithEmailAndPassword } from 'firebase/auth';
 import axios from 'axios';
 
 // Firebase configuration
@@ -67,7 +67,8 @@ interface EditData {
   email: string;
   role: 'Admin' | 'Employee';
   status: 'Active' | 'Pending' | 'Inactive';
-  password?: string; // Optional password field
+  currentPassword?: string; // Added field for current password
+  newPassword?: string; // Renamed password to newPassword for clarity
 }
 
 function TeamManagement() {
@@ -381,7 +382,8 @@ function TeamManagement() {
       email: member.email,
       role: member.role,
       status: member.status,
-      password: ''
+      currentPassword: '',
+      newPassword: ''
     });
     setShowEditModal(true);
   };
@@ -394,6 +396,9 @@ function TeamManagement() {
     if (memberToEdit && editData) {
       try {
         const currentUser = auth.currentUser;
+        let passwordUpdated = false;
+
+        // Update Firebase displayName if editing the current user
         if (currentUser && currentUser.uid === memberToEdit.id) {
           console.log('Updating Firebase displayName to:', editData.name);
           await updateProfile(currentUser, {
@@ -403,13 +408,42 @@ function TeamManagement() {
           console.log('Firebase displayName updated successfully');
         }
 
+        // Update password if both currentPassword and newPassword are provided
+        if (editData.currentPassword && editData.newPassword) {
+          if (editData.newPassword.length < 6) {
+            throw new Error('New password must be at least 6 characters');
+          }
+          try {
+            // Re-authenticate the user with their current password
+            await signInWithEmailAndPassword(auth, memberToEdit.email, editData.currentPassword);
+            if (currentUser && currentUser.uid === memberToEdit.id) {
+              await updatePassword(currentUser, editData.newPassword);
+              passwordUpdated = true;
+              console.log('Password updated successfully in Firebase');
+              showToastMessage('Password updated successfully!');
+            } else {
+              throw new Error('Only the user themselves can update their password');
+            }
+          } catch (error: any) {
+            console.error('Error during password update:', error);
+            let errorMessage = 'Failed to update password';
+            if (error.code === 'auth/wrong-password') {
+              errorMessage = 'Current password is incorrect';
+            } else if (error.code === 'auth/too-many-requests') {
+              errorMessage = 'Too many attempts, please try again later';
+            }
+            throw new Error(errorMessage);
+          }
+        }
+
+        // Update team member data in the database
         const payload = {
           uid: memberToEdit.id,
           name: editData.name,
           email: editData.email,
           role: editData.role,
-          status: editData.status,
-          password: editData.password || undefined
+          status: editData.status
+          // Note: Password is not sent to the backend as it's handled by Firebase
         };
         const response = await axios.put('https://8467nw8mtk.execute-api.eu-north-1.amazonaws.com/default/update_team_member', payload, {
           headers: { 'Content-Type': 'application/json' }
@@ -417,19 +451,17 @@ function TeamManagement() {
 
         if (response.data.message === 'Team member updated successfully') {
           setTeamMembers(prev => prev.map(m =>
-            m.id === memberToEdit.id ? { ...m, ...editData } : m
+            m.id === memberToEdit.id ? { ...m, ...editData, password: undefined } : m
           ));
-          // Refresh Dashboard data
-          window.location.reload(); // Temporary reload to sync state
           setShowEditModal(false);
           setMemberToEdit(null);
           setEditData(null);
-          showToastMessage('Team member updated successfully!');
+          showToastMessage(passwordUpdated ? 'Team member and password updated successfully!' : 'Team member updated successfully!');
         } else {
           throw new Error(response.data.message || 'Update operation failed');
         }
-      } catch (error) {
-        showToastMessage('Failed to update team member', 'error');
+      } catch (error: any) {
+        showToastMessage(error.message || 'Failed to update team member', 'error');
         console.error('Error updating team member:', error);
       }
     }
@@ -451,7 +483,11 @@ function TeamManagement() {
   };
 
   const isEditValid = () => {
-    return editData && editData.name.trim() !== '' && validateEmail(editData.email);
+    return editData && 
+           editData.name.trim() !== '' && 
+           validateEmail(editData.email) &&
+           (!editData.newPassword || editData.newPassword.length >= 6) &&
+           (!editData.newPassword || editData.currentPassword); // Ensure currentPassword is provided if newPassword is set
   };
 
   return (
@@ -833,7 +869,7 @@ function TeamManagement() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#2D2D2D] mb-2">
-                    Password (optional)
+                    Current Password (required for password change)
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -841,8 +877,25 @@ function TeamManagement() {
                     </div>
                     <input
                       type="password"
-                      value={editData.password || ''}
-                      onChange={(e) => handleEditChange('password', e.target.value)}
+                      value={editData.currentPassword || ''}
+                      onChange={(e) => handleEditChange('currentPassword', e.target.value)}
+                      className="w-full pl-10 pr-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                      placeholder="Enter current password"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#2D2D2D] mb-2">
+                    New Password (optional)
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="password"
+                      value={editData.newPassword || ''}
+                      onChange={(e) => handleEditChange('newPassword', e.target.value)}
                       className="w-full pl-10 pr-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
                       placeholder="Enter new password (optional)"
                     />
