@@ -76,7 +76,7 @@ useEffect(() => {
         shootType: item.shootType,
         eventDate: item.eventDate,
         totalAmount: item.total || 0,
-        status: 'Sent', // Default fallback status
+        status: item.status, // Default fallback status
         validUntil: item.validUntil || item.eventDate,
         sentDate: item.timestamp,
         services: item.services.map((s: any) => ({
