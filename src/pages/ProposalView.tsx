@@ -408,15 +408,49 @@ function ProposalView() {
           </div>
         )}
 
-        {/* Latest Change Request (if any) */}
-        {proposal.latestRevisionNote && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h3 className="text-xl font-semibold text-[#2D2D2D] mb-2">Latest Change Request</h3>
-            <p className="text-gray-700 bg-[#FFF7E6] border border-[#FFE0B2] rounded-lg p-3">
-              {proposal.latestRevisionNote}
-            </p>
+        {/* Full Change Request Chat History */}
+{(proposal.revisionHistory?.length || proposal.latestRevisionNote) && (() => {
+  // Build a history list even if only latestRevisionNote exists
+  const history = (proposal.revisionHistory && proposal.revisionHistory.length > 0)
+    ? proposal.revisionHistory
+    : [{ note: proposal.latestRevisionNote as string, at: '' }];
+
+  // Sort oldest → newest (flip if you want newest first)
+  const sorted = [...history].sort((a, b) => {
+    const ta = a.at ? new Date(a.at).getTime() : 0;
+    const tb = b.at ? new Date(b.at).getTime() : 0;
+    return ta - tb;
+  });
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xl font-semibold text-[#2D2D2D]">Change Request History</h3>
+        <span className="text-xs px-2 py-1 rounded-full bg-[#FFF4E5] text-[#9A5B00]">
+          {sorted.length} message{sorted.length > 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {sorted.map((h, idx) => (
+          <div key={`${idx}-${h.at}`} className="flex items-start gap-3">
+            {/* Bubble indicator */}
+            <div className="w-2 h-2 mt-2 rounded-full bg-[#FF6B00]" />
+            <div className="flex-1">
+              <div className="bg-[#FFF7E6] border border-[#FFE0B2] rounded-lg p-3">
+                <p className="text-[#2D2D2D] leading-relaxed">{h.note}</p>
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                {h.at ? new Date(h.at).toLocaleString() : '—'}
+              </div>
+            </div>
           </div>
-        )}
+        ))}
+      </div>
+    </div>
+  );
+})()}
+
 
         {/* Custom Notes */}
         {proposal.customNotes && (
@@ -473,56 +507,57 @@ function ProposalView() {
       </div>
 
       {/* Action Buttons */}
-      {proposalStatus === 'pending' && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 md:relative md:border-t-0 md:bg-transparent md:p-0">
-          <div className="max-w-4xl mx-auto">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <button
-                onClick={handleAccept}
-                disabled={busy}
-                className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-colors duration-200 shadow-lg hover:shadow-xl ${
-                  busy ? 'bg-[#00BCEB]/60 cursor-not-allowed text-white' : 'bg-[#00BCEB] text-white hover:bg-[#00A5CF]'
-                }`}
-              >
-                <Check className="h-4 w-4 mr-2" />
-                {busy ? 'Updating…' : 'Accept Proposal'}
-              </button>
-              
-              <button
-                onClick={() => setShowRevisionModal(true)}
-                disabled={busy}
-                className="flex items-center justify-center px-6 py-3 border-2 border-[#FF6B00] text-[#FF6B00] rounded-lg font-medium hover:bg-[#FF6B00] hover:text-white transition-colors duration-200 disabled:opacity-60"
-              >
-                <Edit3 className="h-4 w-4 mr-2" />
-                Request Changes
-              </button>
-              
-              <button
-                onClick={handleDecline}
-                disabled={busy}
-                className="flex items-center justify-center px-6 py-3 border-2 border-red-500 text-red-500 rounded-lg font-medium hover:bg-red-500 hover:text-white transition-colors duration-200 disabled:opacity-60"
-              >
-                <X className="h-4 w-4 mr-2" />
-                Decline
-              </button>
-              
-              <button
-                onClick={() => {
-                  if (!busy) {
-                    const message = `Hi! I'm interested in the ${proposal.shootType} proposal for ${new Date(proposal.eventDate).toLocaleDateString()}. Can we discuss further?`;
-                    const whatsappUrl = `https://wa.me/919876543210?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                  }
-                }}
-                className="flex items-center justify-center px-6 py-3 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl"
-              >
-                <MessageCircle className="h-4 w-4 mr-2" />
-                WhatsApp Us
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+{(['pending', 'revision_requested'] as UIStatus[]).includes(proposalStatus) && (
+  <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 md:relative md:border-t-0 md:bg-transparent md:p-0">
+    <div className="max-w-4xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <button
+          onClick={handleAccept}
+          disabled={busy}
+          className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-colors duration-200 shadow-lg hover:shadow-xl ${
+            busy ? 'bg-[#00BCEB]/60 cursor-not-allowed text-white' : 'bg-[#00BCEB] text-white hover:bg-[#00A5CF]'
+          }`}
+        >
+          <Check className="h-4 w-4 mr-2" />
+          {busy ? 'Updating…' : 'Accept Proposal'}
+        </button>
+        
+        <button
+          onClick={() => setShowRevisionModal(true)}
+          disabled={busy}
+          className="flex items-center justify-center px-6 py-3 border-2 border-[#FF6B00] text-[#FF6B00] rounded-lg font-medium hover:bg-[#FF6B00] hover:text-white transition-colors duration-200 disabled:opacity-60"
+        >
+          <Edit3 className="h-4 w-4 mr-2" />
+          Request Changes
+        </button>
+        
+        <button
+          onClick={handleDecline}
+          disabled={busy}
+          className="flex items-center justify-center px-6 py-3 border-2 border-red-500 text-red-500 rounded-lg font-medium hover:bg-red-500 hover:text-white transition-colors duration-200 disabled:opacity-60"
+        >
+          <X className="h-4 w-4 mr-2" />
+          Decline
+        </button>
+        
+        <button
+          onClick={() => {
+            if (!busy && proposal) {
+              const message = `Hi! I'm interested in the ${proposal.shootType} proposal for ${new Date(proposal.eventDate).toLocaleDateString()}. Can we discuss further?`;
+              const whatsappUrl = `https://wa.me/919876543210?text=${encodeURIComponent(message)}`;
+              window.open(whatsappUrl, '_blank');
+            }
+          }}
+          className="flex items-center justify-center px-6 py-3 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl"
+        >
+          <MessageCircle className="h-4 w-4 mr-2" />
+          WhatsApp Us
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
 
       {/* Revision Request Modal */}
       {showRevisionModal && (
