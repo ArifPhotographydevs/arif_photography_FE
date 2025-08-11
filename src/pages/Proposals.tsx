@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
-import { useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -17,96 +16,116 @@ import {
   XCircle, 
   AlertCircle,
   ExternalLink,
-  Filter,
-  Download,
   Copy,
-  X
+  X,
+  MessageSquare,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
+
+const GET_ALL_URL = 'https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData';
+const UPDATE_STATUS_URL = 'https://e419qsiwvk.execute-api.eu-north-1.amazonaws.com/updateproposalStatus';
+
+type BackendHistory = { note: string; at: string };
 
 interface Proposal {
   id: string;
   proposalId: string;
   clientName: string;
   clientEmail?: string;
+  clientPhone?: string;
   leadId: string;
   shootType: string;
   eventDate: string;
   totalAmount: number;
-  status: 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Rejected' | 'Expired' | 'pending';
+  status: 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Rejected' | 'Expired' | 'pending' | 'RevisionRequested';
   sentDate?: string;
   viewedDate?: string;
   responseDate?: string;
   validUntil: string;
-  services: Array<{
-    name: string;
-    price: number;
-  }>;
-  addOns: Array<{
-    name: string;
-    price: number;
-  }>;
+  services: Array<{ name: string; price: number }>;
+  addOns: Array<{ name: string; price: number }>;
   notes?: string;
+
+  // NEW: change requests
+  latestRevisionNote?: string;
+  revisionHistory?: BackendHistory[];
+}
+
+function normalizeLeadId(input?: string): string {
+  if (!input) return '';
+  return input.startsWith('LEAD#') ? input.slice('LEAD#'.length) : input;
 }
 
 function Proposals() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filters, setFilters] = useState({
-    status: '',
-    shootType: '',
-    month: ''
-  });
+  const [filters, setFilters] = useState({ status: '', shootType: '', month: '' });
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock proposals data
+  // Row expansion + message modal state
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [messageOpenFor, setMessageOpenFor] = useState<Proposal | null>(null);
+  const [messageText, setMessageText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [toast, setToast] = useState<{type:'success'|'error'; text:string} | null>(null);
 
-const [proposals, setProposals] = useState<Proposal[]>([]);
-const [loading, setLoading] = useState(true);
-useEffect(() => {
-  const fetchProposals = async () => {
-    try {
-      const response = await fetch('https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData');
-      const data = await response.json();
+  useEffect(() => {
+    const fetchProposals = async () => {
+      try {
+        const response = await fetch(GET_ALL_URL);
+        const data = await response.json();
 
-      // Map backend fields to match your Proposal interface
-      const mapped: Proposal[] = data.map((item: any, index: number) => ({
-        id: index.toString(),
-        proposalId: item.proposalId,
-        clientName: item.clientName,
-        clientEmail: '', // Not available in response
-        leadId: item.leadId,
-        shootType: item.shootType,
-        eventDate: item.eventDate,
-        totalAmount: item.total || 0,
-        status: item.status, // Default fallback status
-        validUntil: item.validUntil || item.eventDate,
-        sentDate: item.timestamp,
-        services: item.services.map((s: any) => ({
-          name: s.title,
-          price: s.unitPrice * s.quantity
-        })),
-        addOns: item.addOns.filter((a: any) => a.selected).map((a: any) => ({
-          name: a.name,
-          price: a.price
-        })),
-        notes: item.notes || ''
-      }));
+        const arr = Array.isArray(data) ? data : (data.proposals || []);
+        const mapped: Proposal[] = arr.map((item: any, index: number) => {
+          const leadId = normalizeLeadId(item.leadId || item.PK || item.pk || '');
+          const totalNumber =
+            typeof item.total === 'number' ? item.total :
+            (typeof item.total === 'string' ? Number(item.total) : 0);
 
-      setProposals(mapped);
-    } catch (err) {
-      console.error('Error fetching proposals:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+          return {
+            id: String(index),
+            proposalId: item.proposalId,
+            clientName: item.clientName,
+            clientEmail: item.clientEmail || '',
+            clientPhone: item.clientPhone || '',
+            leadId,
+            shootType: item.shootType,
+            eventDate: item.eventDate,
+            totalAmount: isNaN(totalNumber) ? 0 : totalNumber,
+            status: (item.status || 'pending') as Proposal['status'],
+            validUntil: item.validUntil || item.eventDate,
+            sentDate: item.timestamp,
+            services: Array.isArray(item.services) ? item.services.map((s: any) => ({
+              name: s.title,
+              price: Number(s.unitPrice || 0) * Number(s.quantity || 0)
+            })) : [],
+            addOns: Array.isArray(item.addOns) ? item.addOns.filter((a: any) => a.selected).map((a: any) => ({
+              name: a.name, price: Number(a.price || 0)
+            })) : [],
+            notes: item.notes || '',
+            latestRevisionNote: item.latestRevisionNote,
+            revisionHistory: Array.isArray(item.revisionHistory) ? item.revisionHistory : undefined,
+          };
+        });
 
-  fetchProposals();
-}, []);
+        setProposals(mapped);
+      } catch (err) {
+        console.error('Error fetching proposals:', err);
+        setToast({ type: 'error', text: 'Failed to fetch proposals.' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProposals();
+  }, []);
 
   const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events'];
-  const statusOptions = ['Draft', 'Sent', 'Viewed', 'Accepted', 'Rejected', 'Expired'];
+  const statusOptions = ['Draft', 'Sent', 'Viewed', 'Accepted', 'Rejected', 'Expired', 'RevisionRequested', 'pending'];
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    'January','February','March','April','May','June','July','August','September','October','November','December'
   ];
 
   const getStatusColor = (status: string) => {
@@ -117,6 +136,7 @@ useEffect(() => {
       case 'Accepted': return 'bg-green-500 text-white';
       case 'Rejected': return 'bg-red-500 text-white';
       case 'Expired': return 'bg-gray-500 text-white';
+      case 'RevisionRequested': return 'bg-yellow-500 text-white';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -129,59 +149,45 @@ useEffect(() => {
       case 'Accepted': return CheckCircle;
       case 'Rejected': return XCircle;
       case 'Expired': return AlertCircle;
+      case 'RevisionRequested': return MessageSquare;
       default: return FileText;
     }
   };
 
   const handleFilterChange = (filterType: string, value: string) => {
-    setFilters(prev => ({
-      ...prev,
-      [filterType]: value
-    }));
+    setFilters(prev => ({ ...prev, [filterType]: value }));
   };
 
-  const filteredProposals = proposals.filter(proposal => {
-    const eventDate = new Date(proposal.eventDate);
-    const proposalMonth = eventDate.toLocaleString('default', { month: 'long' });
-    
-    const matchesSearch = !searchTerm || 
-      proposal.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      proposal.proposalId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      proposal.clientEmail.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = !filters.status || proposal.status === filters.status;
-    const matchesShootType = !filters.shootType || proposal.shootType === filters.shootType;
-    const matchesMonth = !filters.month || proposalMonth === filters.month;
-    
-    return matchesSearch && matchesStatus && matchesShootType && matchesMonth;
-  });
+  const filteredProposals = useMemo(() => {
+    return proposals.filter(proposal => {
+      const eventDate = new Date(proposal.eventDate);
+      const proposalMonth = eventDate.toLocaleString('default', { month: 'long' });
 
-  const handleViewProposal = (proposalId: string) => {
-    window.open(`/proposals/view/${proposalId}`, '_blank');
-  };
+      const matchesSearch = !searchTerm ||
+        proposal.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        proposal.proposalId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (proposal.clientEmail || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-  const handleViewLead = (leadId: string) => {
-    window.location.href = `/leads/${leadId}`;
-  };
+      const matchesStatus = !filters.status || proposal.status === filters.status;
+      const matchesShootType = !filters.shootType || proposal.shootType === filters.shootType;
+      const matchesMonth = !filters.month || proposalMonth === filters.month;
 
-  const handleEditProposal = (proposalId: string) => {
-    window.location.href = `/proposals/edit/${proposalId}`;
-  };
+      return matchesSearch && matchesStatus && matchesShootType && matchesMonth;
+    });
+  }, [proposals, searchTerm, filters]);
 
-  const handleDuplicateProposal = (proposalId: string) => {
-    // Simulate duplication
-    console.log('Duplicating proposal:', proposalId);
-  };
+  const handleViewProposal = (proposalId: string) => window.open(`/proposals/view/${proposalId}`, '_blank');
+  const handleViewLead = (leadId: string) => { window.location.href = `/leads/${leadId}`; };
+  const handleEditProposal = (proposalId: string) => { window.location.href = `/proposals/edit/${proposalId}`; };
+  const handleDuplicateProposal = (proposalId: string) => { console.log('Duplicating proposal:', proposalId); };
 
-  const formatCurrency = (amount: number) => {
-    return `₹${amount.toLocaleString()}`;
-  };
+  const formatCurrency = (amount: number) => `₹${(amount || 0).toLocaleString()}`;
 
   const isExpiringSoon = (validUntil: string) => {
     const expiryDate = new Date(validUntil);
     const today = new Date();
-    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
-    return daysUntilExpiry <= 7 && daysUntilExpiry > 0;
+    const days = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+    return days <= 7 && days > 0;
   };
 
   const getProposalStats = () => {
@@ -189,11 +195,65 @@ useEffect(() => {
     const accepted = proposals.filter(p => p.status === 'Accepted').length;
     const pending = proposals.filter(p => p.status === 'pending').length;
     const rejected = proposals.filter(p => p.status === 'Rejected').length;
-    
     return { total, accepted, pending, rejected };
   };
 
   const stats = getProposalStats();
+
+  const toggleExpand = (pid: string) => {
+    setExpandedRows(prev => ({ ...prev, [pid]: !prev[pid] }));
+  };
+
+  // Send message -> append to revisionHistory by calling the same Lambda (RevisionRequested + revisionNotes)
+  const handleSendMessage = async () => {
+    if (!messageOpenFor || !messageText.trim()) return;
+    setSending(true);
+
+    try {
+      const payload = {
+        leadId: messageOpenFor.leadId,
+        proposalId: messageOpenFor.proposalId,
+        status: 'RevisionRequested',
+        revisionNotes: messageText.trim(),
+      };
+
+      const res = await fetch(UPDATE_STATUS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await res.json().catch(() => ({} as any));
+
+      if (!res.ok) {
+        setToast({ type: 'error', text: body?.error || `Failed to send message (${res.status})` });
+        return;
+      }
+
+      const updated = body.updated || {};
+      const newHistory: BackendHistory[] = Array.isArray(updated.revisionHistory) ? updated.revisionHistory : [];
+
+      // update proposals list
+      setProposals(prev => prev.map(p => {
+        if (p.proposalId !== messageOpenFor.proposalId) return p;
+        return {
+          ...p,
+          status: (updated.status as Proposal['status']) || p.status,
+          latestRevisionNote: updated.latestRevisionNote ?? p.latestRevisionNote,
+          revisionHistory: newHistory.length ? newHistory : p.revisionHistory,
+        };
+      }));
+
+      setToast({ type: 'success', text: 'Message sent and history updated.' });
+      setMessageText('');
+      setMessageOpenFor(null);
+    } catch (e) {
+      console.error(e);
+      setToast({ type: 'error', text: 'Network error while sending message.' });
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -201,22 +261,20 @@ useEffect(() => {
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ease-in-out ${
-        sidebarCollapsed ? 'ml-16' : 'ml-64'
-      }`}>
+      <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         {/* Header */}
         <Header title="Proposals" sidebarCollapsed={sidebarCollapsed} />
 
-        {/* Main Content */}
+        {/* Main */}
         <main className="pt-16 p-6">
-          {/* Top Section */}
+          {/* Top */}
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-2xl font-bold text-[#2D2D2D]">Proposals Management</h2>
               <p className="text-gray-600 mt-1">Track and manage all your photography proposals</p>
             </div>
             <button
-              onClick={() => window.location.href = '/proposals/create'}
+              onClick={() => (window.location.href = '/proposals/create')}
               className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -224,7 +282,7 @@ useEffect(() => {
             </button>
           </div>
 
-          {/* Stats Cards */}
+          {/* Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
             <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
               <div className="flex items-center">
@@ -251,35 +309,33 @@ useEffect(() => {
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-            <div className="flex items-center">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-                <X className="h-6 w-6 text-red-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-red-600">Rejected</p>
-                <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
+              <div className="flex items-center">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <X className="h-6 w-6 text-red-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-red-600">Rejected</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
               <div className="flex items-center">
-              <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
-                <Clock className="h-6 w-6 text-gray-500" />
-              </div>
-
+                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-gray-500" />
+                </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Pending</p>
-                  <p className="text-2xl font-bold text-gray">{stats.pending}</p>
+                  <p className="text-2xl font-bold text-gray-700">{stats.pending}</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Filters Section */}
+          {/* Filters */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Search */}
               <div>
                 <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Search</label>
                 <div className="relative">
@@ -290,13 +346,12 @@ useEffect(() => {
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search by client or proposal ID"
+                    placeholder="Search by client, proposal ID or email"
                     className="w-full pl-10 pr-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
                   />
                 </div>
               </div>
 
-              {/* Status Filter */}
               <div>
                 <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Status</label>
                 <select
@@ -311,7 +366,6 @@ useEffect(() => {
                 </select>
               </div>
 
-              {/* Shoot Type Filter */}
               <div>
                 <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Shoot Type</label>
                 <select
@@ -326,7 +380,6 @@ useEffect(() => {
                 </select>
               </div>
 
-              {/* Month Filter */}
               <div>
                 <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Event Month</label>
                 <select
@@ -343,7 +396,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Desktop Table View */}
+          {/* Desktop Table */}
           <div className="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -354,6 +407,7 @@ useEffect(() => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Details</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change Requests</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valid Until</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -362,97 +416,160 @@ useEffect(() => {
                   {filteredProposals.map((proposal) => {
                     const StatusIcon = getStatusIcon(proposal.status);
                     const expiringSoon = isExpiringSoon(proposal.validUntil);
-                    
+                    const isRequested = proposal.status === 'RevisionRequested';
+                    const count = proposal.revisionHistory?.length || (proposal.latestRevisionNote ? 1 : 0);
+                    const expanded = !!expandedRows[proposal.proposalId];
+
                     return (
-                      <tr 
-                        key={proposal.id} 
-                        className="hover:bg-gray-50 transition-colors duration-200"
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div>
-                            <div className="text-sm font-medium text-[#2D2D2D]">{proposal.proposalId}</div>
-                            <div className="text-sm text-gray-500">{proposal.shootType}</div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="w-10 h-10 bg-[#00BCEB]/10 rounded-full flex items-center justify-center">
-                              <User className="h-5 w-5 text-[#00BCEB]" />
-                            </div>
-                            <div className="ml-3">
-                              <div className="text-sm font-medium text-[#2D2D2D]">{proposal.clientName}</div>
-                              <div className="text-sm text-gray-500">{proposal.clientEmail}</div>
-                              <button
-                                onClick={() => handleViewLead(proposal.leadId)}
-                                className="text-xs text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200 flex items-center mt-1"
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1" />
-                                View Lead
-                              </button>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                      <React.Fragment key={proposal.id}>
+                        <tr className="hover:bg-gray-50 transition-colors duration-200">
+                          <td className="px-6 py-4 whitespace-nowrap">
                             <div>
-                              <div className="text-sm text-[#2D2D2D]">
-                                {new Date(proposal.eventDate).toLocaleDateString()}
-                              </div>
+                              <div className="text-sm font-medium text-[#2D2D2D]">{proposal.proposalId}</div>
                               <div className="text-sm text-gray-500">{proposal.shootType}</div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <DollarSign className="h-4 w-4 text-gray-400 mr-2" />
-                            <span className="text-sm font-semibold text-[#2D2D2D]">
-                              {formatCurrency(proposal.totalAmount)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="w-10 h-10 bg-[#00BCEB]/10 rounded-full flex items-center justify-center">
+                                <User className="h-5 w-5 text-[#00BCEB]" />
+                              </div>
+                              <div className="ml-3">
+                                <div className="text-sm font-medium text-[#2D2D2D]">{proposal.clientName}</div>
+                                <div className="text-sm text-gray-500">{proposal.clientEmail}</div>
+                                <button
+                                  onClick={() => handleViewLead(proposal.leadId)}
+                                  className="text-xs text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200 flex items-center mt-1"
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  View Lead
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                              <div>
+                                <div className="text-sm text-[#2D2D2D]">
+                                  {new Date(proposal.eventDate).toLocaleDateString()}
+                                </div>
+                                <div className="text-sm text-gray-500">{proposal.shootType}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <DollarSign className="h-4 w-4 text-gray-400 mr-2" />
+                              <span className="text-sm font-semibold text-[#2D2D2D]">
+                                {formatCurrency(proposal.totalAmount)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(proposal.status)}`}>
+                              <StatusIcon className="h-3 w-3 mr-1" />
+                              {proposal.status}
                             </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(proposal.status)}`}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {proposal.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className={`text-sm ${expiringSoon ? 'text-[#FF6B00] font-medium' : 'text-gray-600'}`}>
-                            {new Date(proposal.validUntil).toLocaleDateString()}
-                            {expiringSoon && (
-                              <div className="text-xs text-[#FF6B00]">Expiring Soon!</div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleViewProposal(proposal.proposalId)}
-                              className="p-2 text-[#00BCEB] hover:text-[#00A5CF] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
-                              title="View Proposal"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {proposal.status === 'Draft' && (
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {isRequested ? (
                               <button
-                                onClick={() => handleEditProposal(proposal.id)}
-                                className="p-2 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
-                                title="Edit Proposal"
+                                onClick={() => toggleExpand(proposal.proposalId)}
+                                className="inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200 transition-colors"
+                                title="View change requests"
                               >
-                                <Edit3 className="h-4 w-4" />
+                                {expanded ? <ChevronDown className="h-3 w-3 mr-1" /> : <ChevronRight className="h-3 w-3 mr-1" />}
+                                {count ? `${count} request${count > 1 ? 's' : ''}` : 'View'}
                               </button>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
                             )}
-                            <button
-                              onClick={() => handleDuplicateProposal(proposal.id)}
-                              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-                              title="Duplicate Proposal"
-                            >
-                              <Copy className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className={`text-sm ${expiringSoon ? 'text-[#FF6B00] font-medium' : 'text-gray-600'}`}>
+                              {new Date(proposal.validUntil).toLocaleDateString()}
+                              {expiringSoon && (
+                                <div className="text-xs text-[#FF6B00]">Expiring Soon!</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => handleViewProposal(proposal.proposalId)}
+                                className="p-2 text-[#00BCEB] hover:text-[#00A5CF] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
+                                title="View Proposal"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </button>
+                              {proposal.status === 'Draft' && (
+                                <button
+                                  onClick={() => handleEditProposal(proposal.id)}
+                                  className="p-2 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
+                                  title="Edit Proposal"
+                                >
+                                  <Edit3 className="h-4 w-4" />
+                                </button>
+                              )}
+                              {isRequested && (
+                                <button
+                                  onClick={() => setMessageOpenFor(proposal)}
+                                  className="p-2 text-yellow-700 hover:bg-yellow-50 rounded-lg transition-colors duration-200"
+                                  title="Send Message"
+                                >
+                                  <MessageSquare className="h-4 w-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDuplicateProposal(proposal.id)}
+                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                                title="Duplicate Proposal"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Expanded history row */}
+                        {isRequested && expanded && (
+                          <tr className="bg-yellow-50/40">
+                            <td colSpan={8} className="px-6 py-4">
+                              <div className="space-y-3">
+                                <div className="text-sm font-semibold text-[#2D2D2D]">Change Request History</div>
+                                {(proposal.revisionHistory?.length
+                                  ? proposal.revisionHistory
+                                  : proposal.latestRevisionNote
+                                    ? [{ note: proposal.latestRevisionNote, at: '' }]
+                                    : []
+                                ).map((h, idx) => (
+                                  <div key={idx} className="flex items-start justify-between bg-white border border-yellow-200 rounded-lg p-3">
+                                    <div className="text-sm text-gray-800">{h.note}</div>
+                                    <div className="text-xs text-gray-500 ml-4 whitespace-nowrap">
+                                      {h.at ? new Date(h.at).toLocaleString() : ''}
+                                    </div>
+                                  </div>
+                                ))}
+
+                                {!proposal.revisionHistory?.length && !proposal.latestRevisionNote && (
+                                  <div className="text-sm text-gray-500 italic">No notes yet.</div>
+                                )}
+
+                                <div>
+                                  <button
+                                    onClick={() => setMessageOpenFor(proposal)}
+                                    className="inline-flex items-center px-3 py-2 bg-yellow-500 text-white rounded-lg text-xs font-semibold hover:bg-yellow-600 transition-colors"
+                                  >
+                                    <MessageSquare className="h-4 w-4 mr-1" />
+                                    Send Message
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -460,7 +577,7 @@ useEffect(() => {
             </div>
 
             {/* Empty State */}
-            {filteredProposals.length === 0 && (
+            {filteredProposals.length === 0 && !loading && (
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-500 text-lg">No proposals found</p>
@@ -469,17 +586,16 @@ useEffect(() => {
             )}
           </div>
 
-          {/* Mobile Card View */}
+          {/* Mobile Cards */}
           <div className="md:hidden space-y-4">
             {filteredProposals.map((proposal) => {
               const StatusIcon = getStatusIcon(proposal.status);
               const expiringSoon = isExpiringSoon(proposal.validUntil);
-              
+              const isRequested = proposal.status === 'RevisionRequested';
+              const count = proposal.revisionHistory?.length || (proposal.latestRevisionNote ? 1 : 0);
+
               return (
-                <div
-                  key={proposal.id}
-                  className="bg-white rounded-lg shadow-sm border border-gray-100 p-4"
-                >
+                <div key={proposal.id} className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="text-sm font-medium text-[#2D2D2D]">{proposal.proposalId}</h3>
@@ -490,24 +606,40 @@ useEffect(() => {
                       {proposal.status}
                     </span>
                   </div>
-                  
+
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Amount:</span>
                       <span className="font-semibold text-[#2D2D2D]">{formatCurrency(proposal.totalAmount)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Event Date:</span>
+                      <span className="text-gray-600">Event:</span>
                       <span className="text-[#2D2D2D]">{new Date(proposal.eventDate).toLocaleDateString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Valid Until:</span>
-                      <span className={expiringSoon ? 'text-[#FF6B00] font-medium' : 'text-[#2D2D2D]'}>
-                        {new Date(proposal.validUntil).toLocaleDateString()}
-                      </span>
+                      <span className={expiringSoon ? 'text-[#FF6B00] font-medium' : 'text-[#2D2D2D]'}>{new Date(proposal.validUntil).toLocaleDateString()}</span>
                     </div>
                   </div>
-                  
+
+                  {isRequested && (
+                    <>
+                      <div className="mt-3 text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 inline-flex items-center">
+                        <MessageSquare className="h-3 w-3 mr-1" />
+                        {count ? `${count} request${count > 1 ? 's' : ''}` : 'Change requested'}
+                      </div>
+                      <div className="mt-3">
+                        <button
+                          onClick={() => setMessageOpenFor(proposal)}
+                          className="w-full inline-flex items-center justify-center px-3 py-2 bg-yellow-500 text-white rounded-lg text-xs font-semibold hover:bg-yellow-600 transition-colors"
+                        >
+                          <MessageSquare className="h-4 w-4 mr-1" />
+                          Send Message
+                        </button>
+                      </div>
+                    </>
+                  )}
+
                   <div className="flex items-center justify-between mt-4">
                     <button
                       onClick={() => handleViewLead(proposal.leadId)}
@@ -518,7 +650,7 @@ useEffect(() => {
                     </button>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => handleViewProposal(proposal.id)}
+                        onClick={() => handleViewProposal(proposal.proposalId)}
                         className="p-2 text-[#00BCEB] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
                       >
                         <Eye className="h-4 w-4" />
@@ -543,8 +675,7 @@ useEffect(() => {
               );
             })}
 
-            {/* Mobile Empty State */}
-            {filteredProposals.length === 0 && (
+            {filteredProposals.length === 0 && !loading && (
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-500 text-lg">No proposals found</p>
@@ -554,6 +685,68 @@ useEffect(() => {
           </div>
         </main>
       </div>
+
+      {/* Message Modal */}
+      {messageOpenFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !sending && setMessageOpenFor(null)} />
+          <div className="relative bg-white w-full max-w-md rounded-xl shadow-2xl p-6 mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[#2D2D2D]">
+                Send Message — {messageOpenFor.proposalId}
+              </h3>
+              <button
+                onClick={() => !sending && setMessageOpenFor(null)}
+                className="p-2 rounded hover:bg-gray-100"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              This will be saved to the proposal’s change request history.
+            </p>
+            <textarea
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200 resize-none"
+              placeholder="Type your message to the client..."
+              disabled={sending}
+            />
+            <div className="flex items-center justify-end space-x-3 mt-4">
+              <button
+                onClick={() => setMessageOpenFor(null)}
+                className="px-4 py-2 text-[#2D2D2D] bg-gray-100 rounded-lg font-medium hover:bg-gray-200 transition-colors duration-200 disabled:opacity-60"
+                disabled={sending}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendMessage}
+                disabled={sending || !messageText.trim()}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors duration-200 ${
+                  messageText.trim() && !sending
+                    ? 'bg-[#FF6B00] text-white hover:bg-[#e55a00]'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                {sending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in ${
+            toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+          }`}
+        >
+          <p className="font-medium">{toast.text}</p>
+        </div>
+      )}
     </div>
   );
 }

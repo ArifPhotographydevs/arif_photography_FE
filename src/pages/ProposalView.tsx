@@ -38,6 +38,10 @@ interface ProposalData {
   customNotes: string;
   timeline: Array<{ phase: string; description: string; duration: string; }>;
   status: UIStatus;          // UI-friendly status
+
+  // NEW (optional, returned by Lambda after first change request)
+  latestRevisionNote?: string;
+  revisionHistory?: Array<{ note: string; at: string }>;
 }
 
 const UPDATE_STATUS_URL = 'https://e419qsiwvk.execute-api.eu-north-1.amazonaws.com/updateproposalStatus';
@@ -49,7 +53,7 @@ function normalizeLeadId(input?: string): string {
 }
 
 function apiStatusFromUI(status: UIStatus): string {
-  // Adjust to exactly what your Lambda expects/stores
+  // Must match what Lambda expects/stores
   switch (status) {
     case 'accepted': return 'Accepted';
     case 'declined': return 'Rejected';
@@ -121,6 +125,10 @@ function ProposalView() {
           customNotes: matched.notes || '',
           timeline: [], // fill if API provides it
           status: uiStatusFromAPI(matched.status),
+
+          // In case your GetAll already returns these
+          latestRevisionNote: matched.latestRevisionNote,
+          revisionHistory: Array.isArray(matched.revisionHistory) ? matched.revisionHistory : undefined,
         };
 
         setProposal(mapped);
@@ -167,12 +175,15 @@ function ProposalView() {
 
   async function updateStatus(next: UIStatus, extraNotes?: string) {
     if (!proposal) return;
-    const payload = {
-      leadId: proposal.leadId,              // normalized (no LEAD#)
-      proposalId: proposal.id,              // as shown in URL
+
+    const payload: any = {
+      leadId: proposal.leadId,      // normalized (no LEAD#)
+      proposalId: proposal.id,      // as shown in URL
       status: apiStatusFromUI(next),
-      // If your Lambda wants notes, add: revisionNotes: extraNotes
     };
+    if (next === 'revision_requested' && extraNotes?.trim()) {
+      payload.revisionNotes = extraNotes.trim();
+    }
 
     // optimistic UI
     const prev = proposalStatus;
@@ -197,8 +208,21 @@ function ProposalView() {
         return;
       }
 
-      // success
-      showToastMessage(`Status updated to ${next.replace('_', ' ')}.`);
+      // Success: update local proposal with whatever Lambda returned
+      const updated = body?.updated || {};
+      const nextStatus = uiStatusFromAPI(updated?.status) || next;
+
+      setProposalStatus(nextStatus);
+      setProposal((p) =>
+        p ? {
+          ...p,
+          status: nextStatus,
+          latestRevisionNote: updated?.latestRevisionNote ?? p.latestRevisionNote,
+          revisionHistory: Array.isArray(updated?.revisionHistory) ? updated.revisionHistory : p.revisionHistory,
+        } : p
+      );
+
+      showToastMessage(`Status updated to ${nextStatus.replace('_', ' ')}.`);
     } catch (err) {
       setProposalStatus(prev);
       console.error(err);
@@ -213,8 +237,9 @@ function ProposalView() {
   const handleRevisionRequest = async () => {
     if (!revisionNotes.trim()) return;
     setShowRevisionModal(false);
+    const notes = revisionNotes.trim();
     setRevisionNotes('');
-    await updateStatus('revision_requested', revisionNotes);
+    await updateStatus('revision_requested', notes);
   };
 
   const handleWhatsApp = () => {
@@ -383,25 +408,15 @@ function ProposalView() {
           </div>
         )}
 
-        {/* Portfolio Gallery */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-xl font-semibold text-[#2D2D2D] mb-4">Our Recent Work</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            {portfolioImages.map((image, index) => (
-              <div key={index} className="aspect-square rounded-lg overflow-hidden">
-                <img
-                  src={image}
-                  alt={`Portfolio ${index + 1}`}
-                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
-                />
-              </div>
-            ))}
+        {/* Latest Change Request (if any) */}
+        {proposal.latestRevisionNote && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <h3 className="text-xl font-semibold text-[#2D2D2D] mb-2">Latest Change Request</h3>
+            <p className="text-gray-700 bg-[#FFF7E6] border border-[#FFE0B2] rounded-lg p-3">
+              {proposal.latestRevisionNote}
+            </p>
           </div>
-          <button className="text-[#00BCEB] hover:text-[#00A5CF] font-medium text-sm flex items-center">
-            View Full Portfolio
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </button>
-        </div>
+        )}
 
         {/* Custom Notes */}
         {proposal.customNotes && (
@@ -550,7 +565,7 @@ function ProposalView() {
       {/* Toast */}
       {showToast && (
         <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
-          <p className="font-medium">{toastMessage}</p>
+        <p className="font-medium">{toastMessage}</p>
         </div>
       )}
 
