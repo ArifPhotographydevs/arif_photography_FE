@@ -11,104 +11,129 @@ import {
   Star,
   ChevronRight,
   ChevronDown,
-  User,
   Clock,
-  Image,
-  FileText,
-  DollarSign,
   Quote
 } from 'lucide-react';
 
+interface Service {
+  title: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+interface AddOn { name: string; price: number; }
+
+type UIStatus = 'pending' | 'accepted' | 'declined' | 'revision_requested';
+
 interface ProposalData {
-  id: string;
+  id: string;                // proposalId
+  leadId: string;            // normalized leadId (no LEAD# prefix)
   clientName: string;
   shootType: string;
   eventDate: string;
   venue: string;
-  services: Array<{
-    title: string;
-    description: string;
-    quantity: number;
-    unitPrice: number;
-  }>;
-  addOns: Array<{
-    name: string;
-    price: number;
-  }>;
+  services: Service[];
+  addOns: AddOn[];
   gstEnabled: boolean;
   customNotes: string;
-  timeline: Array<{
-    phase: string;
-    description: string;
-    duration: string;
-  }>;
-  status: 'pending' | 'accepted' | 'declined' | 'revision_requested';
+  timeline: Array<{ phase: string; description: string; duration: string; }>;
+  status: UIStatus;          // UI-friendly status
+}
+
+const UPDATE_STATUS_URL = 'https://e419qsiwvk.execute-api.eu-north-1.amazonaws.com/updateproposalStatus';
+const GET_ALL_URL = 'https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData';
+
+function normalizeLeadId(input?: string): string {
+  if (!input) return '';
+  return input.startsWith('LEAD#') ? input.slice('LEAD#'.length) : input;
+}
+
+function apiStatusFromUI(status: UIStatus): string {
+  // Adjust to exactly what your Lambda expects/stores
+  switch (status) {
+    case 'accepted': return 'Accepted';
+    case 'declined': return 'Rejected';
+    case 'revision_requested': return 'RevisionRequested';
+    default: return 'pending';
+  }
+}
+function uiStatusFromAPI(raw?: string): UIStatus {
+  if (!raw) return 'pending';
+  const s = raw.toLowerCase();
+  if (s === 'accepted') return 'accepted';
+  if (s === 'rejected' || s === 'declined') return 'declined';
+  if (s === 'revisionrequested' || s === 'revision_requested') return 'revision_requested';
+  return 'pending';
 }
 
 function ProposalView() {
-  const [proposalStatus, setProposalStatus] = useState<'pending' | 'accepted' | 'declined' | 'revision_requested'>('pending');
+  const { id: proposalId } = useParams();   
+  const [proposal, setProposal] = useState<ProposalData | null>(null);
+  const [proposalStatus, setProposalStatus] = useState<UIStatus>('pending');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
   const [showTerms, setShowTerms] = useState(false);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
   const [revisionNotes, setRevisionNotes] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-    const [proposal, setProposal] = useState<ProposalData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const { id: proposalId } = useParams();   
 
-  // Mock proposal data
-useEffect(() => {
-  const fetchProposal = async () => {
-    try {
-      const response = await fetch('https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData');
-      const data = await response.json();
+  useEffect(() => {
+    const fetchProposal = async () => {
+      try {
+        const resp = await fetch(GET_ALL_URL);
+        const data = await resp.json();
+        const proposals = Array.isArray(data) ? data : data.proposals || [];
 
-      console.log("Fetched proposalId from URL:", proposalId);
-      console.log("API response:", data);
+        const matched = proposals.find(
+          (item: any) => item.proposalId?.toString().trim() === proposalId?.toString().trim()
+        );
 
-      const proposals = Array.isArray(data) ? data : data.proposals || [];
+        if (!matched) {
+          console.warn('No matching proposal found for proposalId:', proposalId);
+          setProposal(null);
+          return;
+        }
 
-      const matched = proposals.find(
-        (item: any) => item.proposalId?.toString().trim() === proposalId?.toString().trim()
-      );
+        const leadIdRaw = matched.leadId || matched.PK || matched.pk || '';
+        const leadId = normalizeLeadId(
+          typeof leadIdRaw === 'string' ? leadIdRaw : String(leadIdRaw)
+        );
 
-      if (!matched) {
-        console.warn('No matching proposal found for proposalId:', proposalId);
-      }
-
-      if (matched) {
         const mapped: ProposalData = {
           id: matched.proposalId,
+          leadId,
           clientName: matched.clientName,
           shootType: matched.shootType,
           eventDate: matched.eventDate,
           venue: matched.venue || '',
-          services: matched.services.map((s: any) => ({
+          services: (matched.services || []).map((s: any) => ({
             title: s.title,
             description: s.description || '',
-            quantity: s.quantity,
-            unitPrice: s.unitPrice
+            quantity: Number(s.quantity || 0),
+            unitPrice: Number(s.unitPrice || 0),
           })),
-          addOns: matched.addOns
+          addOns: (matched.addOns || [])
             .filter((a: any) => a.selected)
-            .map((a: any) => ({ name: a.name, price: a.price })),
-          gstEnabled: matched.gstEnabled,
+            .map((a: any) => ({ name: a.name, price: Number(a.price || 0) })),
+          gstEnabled: !!matched.gstEnabled,
           customNotes: matched.notes || '',
-          timeline: [], // You can fill this if available in API
-          status: 'pending'
+          timeline: [], // fill if API provides it
+          status: uiStatusFromAPI(matched.status),
         };
 
         setProposal(mapped);
+        setProposalStatus(mapped.status);
+      } catch (e) {
+        console.error('Failed to fetch proposal:', e);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Failed to fetch proposal:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  fetchProposal();
-}, [proposalId]);
+    fetchProposal();
+  }, [proposalId]);
 
   const portfolioImages = [
     'https://images.pexels.com/photos/1024993/pexels-photo-1024993.jpeg?auto=compress&cs=tinysrgb&w=400',
@@ -118,29 +143,19 @@ useEffect(() => {
   ];
 
   const testimonials = [
-    {
-      name: 'Priya & Raj',
-      feedback: 'Arif captured our wedding beautifully! Every moment was perfect and the photos exceeded our expectations.',
-      rating: 5
-    },
-    {
-      name: 'Emma Wilson',
-      feedback: 'Professional, creative, and so easy to work with. Our maternity shoot was absolutely stunning!',
-      rating: 5
-    }
+    { name: 'Priya & Raj', feedback: 'Arif captured our wedding beautifully! Every moment was perfect and the photos exceeded our expectations.', rating: 5 },
+    { name: 'Emma Wilson', feedback: 'Professional, creative, and so easy to work with. Our maternity shoot was absolutely stunning!', rating: 5 }
   ];
 
   const calculateSubtotal = () => {
-    const servicesTotal = proposal.services.reduce((total, service) => 
-      total + (service.quantity * service.unitPrice), 0
-    );
-    const addOnsTotal = proposal.addOns.reduce((total, addOn) => total + addOn.price, 0);
+    if (!proposal) return 0;
+    const servicesTotal = proposal.services.reduce((total, s) => total + (s.quantity * s.unitPrice), 0);
+    const addOnsTotal = proposal.addOns.reduce((t, a) => t + a.price, 0);
     return servicesTotal + addOnsTotal;
   };
-
   const calculateTotal = () => {
     const subtotal = calculateSubtotal();
-    const gstAmount = proposal.gstEnabled ? subtotal * 0.18 : 0;
+    const gstAmount = proposal?.gstEnabled ? subtotal * 0.18 : 0;
     return subtotal + gstAmount;
   };
 
@@ -150,26 +165,60 @@ useEffect(() => {
     setTimeout(() => setShowToast(false), 3000);
   };
 
-  const handleAccept = () => {
-    setProposalStatus('accepted');
-    showToastMessage('Proposal accepted! We\'ll be in touch soon.');
-  };
+  async function updateStatus(next: UIStatus, extraNotes?: string) {
+    if (!proposal) return;
+    const payload = {
+      leadId: proposal.leadId,              // normalized (no LEAD#)
+      proposalId: proposal.id,              // as shown in URL
+      status: apiStatusFromUI(next),
+      // If your Lambda wants notes, add: revisionNotes: extraNotes
+    };
 
-  const handleDecline = () => {
-    setProposalStatus('declined');
-    showToastMessage('Proposal declined. Thank you for considering us.');
-  };
+    // optimistic UI
+    const prev = proposalStatus;
+    setProposalStatus(next);
+    setBusy(true);
 
-  const handleRevisionRequest = () => {
-    if (revisionNotes.trim()) {
-      setProposalStatus('revision_requested');
-      setShowRevisionModal(false);
-      setRevisionNotes('');
-      showToastMessage('Revision request sent! We\'ll get back to you soon.');
+    try {
+      const res = await fetch(UPDATE_STATUS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await res.json().catch(() => ({} as any));
+
+      if (!res.ok) {
+        // revert on failure
+        setProposalStatus(prev);
+        const msg = body?.error || `Failed to update status (${res.status})`;
+        showToastMessage(msg);
+        console.error('Update failed:', body);
+        return;
+      }
+
+      // success
+      showToastMessage(`Status updated to ${next.replace('_', ' ')}.`);
+    } catch (err) {
+      setProposalStatus(prev);
+      console.error(err);
+      showToastMessage('Network error while updating status.');
+    } finally {
+      setBusy(false);
     }
+  }
+
+  const handleAccept = () => updateStatus('accepted');
+  const handleDecline = () => updateStatus('declined');
+  const handleRevisionRequest = async () => {
+    if (!revisionNotes.trim()) return;
+    setShowRevisionModal(false);
+    setRevisionNotes('');
+    await updateStatus('revision_requested', revisionNotes);
   };
 
   const handleWhatsApp = () => {
+    if (!proposal) return;
     const message = `Hi! I'm interested in the ${proposal.shootType} proposal for ${new Date(proposal.eventDate).toLocaleDateString()}. Can we discuss further?`;
     const whatsappUrl = `https://wa.me/919876543210?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
@@ -183,7 +232,6 @@ useEffect(() => {
       default: return 'text-gray-600';
     }
   };
-
   const getStatusText = () => {
     switch (proposalStatus) {
       case 'accepted': return 'Accepted ✅';
@@ -193,16 +241,10 @@ useEffect(() => {
     }
   };
 
-if (loading) {
-  return <div className="text-center p-10 text-gray-500">Loading proposal...</div>;
-}
+  if (loading) return <div className="text-center p-10 text-gray-500">Loading proposal...</div>;
+  if (!proposal) return <div className="text-center p-10 text-red-500">Proposal not found.</div>;
 
-if (!proposal) {
-  return <div className="text-center p-10 text-red-500">Proposal not found.</div>;
-}
-
-return (
-
+  return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200 p-4">
@@ -253,10 +295,7 @@ return (
                 <p className="text-sm text-gray-500">Event Date</p>
                 <p className="font-medium text-[#2D2D2D]">
                   {new Date(proposal.eventDate).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
+                    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                   })}
                 </p>
               </div>
@@ -276,8 +315,6 @@ return (
         {/* Pricing Table */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h3 className="text-xl font-semibold text-[#2D2D2D] mb-4">Package Details</h3>
-          
-          {/* Services */}
           <div className="space-y-4 mb-6">
             {proposal.services.map((service, index) => (
               <div key={index} className="flex justify-between items-start p-4 bg-gray-50 rounded-lg">
@@ -293,7 +330,6 @@ return (
             ))}
           </div>
 
-          {/* Add-ons */}
           {proposal.addOns.length > 0 && (
             <div className="mb-6">
               <h4 className="font-medium text-[#2D2D2D] mb-3">Selected Add-ons</h4>
@@ -308,7 +344,6 @@ return (
             </div>
           )}
 
-          {/* Total */}
           <div className="border-t pt-4 space-y-2">
             <div className="flex justify-between text-[#2D2D2D]">
               <span>Subtotal:</span>
@@ -327,24 +362,26 @@ return (
           </div>
         </div>
 
-        {/* Timeline */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-xl font-semibold text-[#2D2D2D] mb-4">Project Timeline</h3>
-          <div className="space-y-4">
-            {proposal.timeline.map((phase, index) => (
-              <div key={index} className="flex items-start space-x-4">
-                <div className="w-8 h-8 bg-[#00BCEB]/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Clock className="h-4 w-4 text-[#00BCEB]" />
+        {/* Timeline (optional data) */}
+        {proposal.timeline.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <h3 className="text-xl font-semibold text-[#2D2D2D] mb-4">Project Timeline</h3>
+            <div className="space-y-4">
+              {proposal.timeline.map((phase, index) => (
+                <div key={index} className="flex items-start space-x-4">
+                  <div className="w-8 h-8 bg-[#00BCEB]/10 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Clock className="h-4 w-4 text-[#00BCEB]" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-medium text-[#2D2D2D]">{phase.phase}</h4>
+                    <p className="text-sm text-gray-600 mt-1">{phase.description}</p>
+                    <p className="text-xs text-[#FF6B00] mt-1 font-medium">{phase.duration}</p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <h4 className="font-medium text-[#2D2D2D]">{phase.phase}</h4>
-                  <p className="text-sm text-gray-600 mt-1">{phase.description}</p>
-                  <p className="text-xs text-[#FF6B00] mt-1 font-medium">{phase.duration}</p>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Portfolio Gallery */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -380,19 +417,19 @@ return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h3 className="text-xl font-semibold text-[#2D2D2D] mb-4">What Our Clients Say</h3>
           <div className="space-y-4">
-            {testimonials.map((testimonial, index) => (
+            {testimonials.map((t, index) => (
               <div key={index} className="bg-gray-50 rounded-lg p-4">
                 <div className="flex items-center mb-2">
                   <div className="flex text-yellow-400">
-                    {[...Array(testimonial.rating)].map((_, i) => (
+                    {[...Array(t.rating)].map((_, i) => (
                       <Star key={i} className="h-4 w-4 fill-current" />
                     ))}
                   </div>
-                  <span className="ml-2 font-medium text-[#2D2D2D]">{testimonial.name}</span>
+                  <span className="ml-2 font-medium text-[#2D2D2D]">{t.name}</span>
                 </div>
                 <div className="flex items-start">
                   <Quote className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0 mt-1" />
-                  <p className="text-gray-600 italic">{testimonial.feedback}</p>
+                  <p className="text-gray-600 italic">{t.feedback}</p>
                 </div>
               </div>
             ))}
@@ -401,16 +438,9 @@ return (
 
         {/* Terms & Conditions */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <button
-            onClick={() => setShowTerms(!showTerms)}
-            className="flex items-center justify-between w-full text-left"
-          >
+          <button onClick={() => setShowTerms(!showTerms)} className="flex items-center justify-between w-full text-left">
             <h3 className="text-xl font-semibold text-[#2D2D2D]">Terms & Conditions</h3>
-            {showTerms ? (
-              <ChevronDown className="h-5 w-5 text-gray-400" />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-gray-400" />
-            )}
+            {showTerms ? <ChevronDown className="h-5 w-5 text-gray-400" /> : <ChevronRight className="h-5 w-5 text-gray-400" />}
           </button>
           {showTerms && (
             <div className="mt-4 p-4 bg-gray-50 rounded-lg max-h-64 overflow-y-auto">
@@ -427,22 +457,26 @@ return (
         </div>
       </div>
 
-      {/* Action Buttons - Fixed at bottom on mobile */}
+      {/* Action Buttons */}
       {proposalStatus === 'pending' && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 md:relative md:border-t-0 md:bg-transparent md:p-0">
           <div className="max-w-4xl mx-auto">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <button
                 onClick={handleAccept}
-                className="flex items-center justify-center px-6 py-3 bg-[#00BCEB] text-white rounded-lg font-medium hover:bg-[#00A5CF] transition-colors duration-200 shadow-lg hover:shadow-xl"
+                disabled={busy}
+                className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-colors duration-200 shadow-lg hover:shadow-xl ${
+                  busy ? 'bg-[#00BCEB]/60 cursor-not-allowed text-white' : 'bg-[#00BCEB] text-white hover:bg-[#00A5CF]'
+                }`}
               >
                 <Check className="h-4 w-4 mr-2" />
-                Accept Proposal
+                {busy ? 'Updating…' : 'Accept Proposal'}
               </button>
               
               <button
                 onClick={() => setShowRevisionModal(true)}
-                className="flex items-center justify-center px-6 py-3 border-2 border-[#FF6B00] text-[#FF6B00] rounded-lg font-medium hover:bg-[#FF6B00] hover:text-white transition-colors duration-200"
+                disabled={busy}
+                className="flex items-center justify-center px-6 py-3 border-2 border-[#FF6B00] text-[#FF6B00] rounded-lg font-medium hover:bg-[#FF6B00] hover:text-white transition-colors duration-200 disabled:opacity-60"
               >
                 <Edit3 className="h-4 w-4 mr-2" />
                 Request Changes
@@ -450,14 +484,21 @@ return (
               
               <button
                 onClick={handleDecline}
-                className="flex items-center justify-center px-6 py-3 border-2 border-red-500 text-red-500 rounded-lg font-medium hover:bg-red-500 hover:text-white transition-colors duration-200"
+                disabled={busy}
+                className="flex items-center justify-center px-6 py-3 border-2 border-red-500 text-red-500 rounded-lg font-medium hover:bg-red-500 hover:text-white transition-colors duration-200 disabled:opacity-60"
               >
                 <X className="h-4 w-4 mr-2" />
                 Decline
               </button>
               
               <button
-                onClick={handleWhatsApp}
+                onClick={() => {
+                  if (!busy) {
+                    const message = `Hi! I'm interested in the ${proposal.shootType} proposal for ${new Date(proposal.eventDate).toLocaleDateString()}. Can we discuss further?`;
+                    const whatsappUrl = `https://wa.me/919876543210?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                  }
+                }}
                 className="flex items-center justify-center px-6 py-3 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl"
               >
                 <MessageCircle className="h-4 w-4 mr-2" />
@@ -491,9 +532,9 @@ return (
                 </button>
                 <button
                   onClick={handleRevisionRequest}
-                  disabled={!revisionNotes.trim()}
+                  disabled={!revisionNotes.trim() || busy}
                   className={`px-6 py-2 rounded-lg font-medium transition-colors duration-200 ${
-                    revisionNotes.trim()
+                    revisionNotes.trim() && !busy
                       ? 'bg-[#FF6B00] text-white hover:bg-[#e55a00]'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
@@ -506,17 +547,14 @@ return (
         </div>
       )}
 
-      {/* Toast Notification */}
+      {/* Toast */}
       {showToast && (
         <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
           <p className="font-medium">{toastMessage}</p>
         </div>
       )}
 
-      {/* Bottom padding for mobile fixed buttons */}
-      {proposalStatus === 'pending' && (
-        <div className="h-20 md:h-0"></div>
-      )}
+      {proposalStatus === 'pending' && <div className="h-20 md:h-0" />}
     </div>
   );
 }

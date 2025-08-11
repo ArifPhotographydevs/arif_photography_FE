@@ -19,7 +19,8 @@ import {
   ExternalLink,
   Filter,
   Download,
-  Copy
+  Copy,
+  X
 } from 'lucide-react';
 
 interface Proposal {
@@ -31,7 +32,7 @@ interface Proposal {
   shootType: string;
   eventDate: string;
   totalAmount: number;
-  status: 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Rejected' | 'Expired';
+  status: 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Rejected' | 'Expired' | 'pending';
   sentDate?: string;
   viewedDate?: string;
   responseDate?: string;
@@ -186,10 +187,10 @@ useEffect(() => {
   const getProposalStats = () => {
     const total = proposals.length;
     const accepted = proposals.filter(p => p.status === 'Accepted').length;
-    const pending = proposals.filter(p => ['Sent', 'Viewed'].includes(p.status)).length;
-    const draft = proposals.filter(p => p.status === 'Draft').length;
+    const pending = proposals.filter(p => p.status === 'pending').length;
+    const rejected = proposals.filter(p => p.status === 'Rejected').length;
     
-    return { total, accepted, pending, draft };
+    return { total, accepted, pending, rejected };
   };
 
   const stats = getProposalStats();
@@ -250,25 +251,26 @@ useEffect(() => {
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-[#FF6B00]/10 rounded-full flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-[#FF6B00]" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending</p>
-                  <p className="text-2xl font-bold text-[#FF6B00]">{stats.pending}</p>
-                </div>
+            <div className="flex items-center">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <X className="h-6 w-6 text-red-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-red-600">Rejected</p>
+                <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
               </div>
             </div>
+          </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
               <div className="flex items-center">
-                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                  <Edit3 className="h-6 w-6 text-gray-600" />
-                </div>
+              <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
+                <Clock className="h-6 w-6 text-gray-500" />
+              </div>
+
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Drafts</p>
-                  <p className="text-2xl font-bold text-gray-600">{stats.draft}</p>
+                  <p className="text-sm font-medium text-gray-600">Pending</p>
+                  <p className="text-2xl font-bold text-gray">{stats.pending}</p>
                 </div>
               </div>
             </div>
