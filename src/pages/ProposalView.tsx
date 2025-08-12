@@ -173,64 +173,100 @@ function ProposalView() {
     setTimeout(() => setShowToast(false), 3000);
   };
 
-  async function updateStatus(next: UIStatus, extraNotes?: string) {
-    if (!proposal) return;
+async function updateStatus(next: UIStatus, extraNotes?: string) {
+  if (!proposal) return;
 
-    const payload: any = {
-      leadId: proposal.leadId,      // normalized (no LEAD#)
-      proposalId: proposal.id,      // as shown in URL
-      status: apiStatusFromUI(next),
-    };
-    if (next === 'revision_requested' && extraNotes?.trim()) {
-      payload.revisionNotes = extraNotes.trim();
+  const payload: any = {
+    leadId: proposal.leadId,      // normalized (no LEAD#)
+    proposalId: proposal.id,      // as shown in URL
+    status: apiStatusFromUI(next),
+  };
+  if (next === 'revision_requested' && extraNotes?.trim()) {
+    payload.revisionNotes = extraNotes.trim();
+  }
+
+  // Optimistic UI
+  const prev = proposalStatus;
+  setProposalStatus(next);
+  setBusy(true);
+
+  try {
+    // First API: Update proposal status
+    const res = await fetch(UPDATE_STATUS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await res.json().catch(() => ({} as any));
+
+    if (!res.ok) {
+      // Revert on failure
+      setProposalStatus(prev);
+      const msg = body?.error || `Failed to update status (${res.status})`;
+      showToastMessage(msg);
+      console.error('Update failed:', body);
+      return;
     }
 
-    // optimistic UI
-    const prev = proposalStatus;
-    setProposalStatus(next);
-    setBusy(true);
+    // Success: Update local proposal with whatever Lambda returned
+    const updated = body?.updated || {};
+    const nextStatus = uiStatusFromAPI(updated?.status) || next;
 
+    setProposalStatus(nextStatus);
+    setProposal((p) =>
+      p
+        ? {
+            ...p,
+            status: nextStatus,
+            latestRevisionNote: updated?.latestRevisionNote ?? p.latestRevisionNote,
+            revisionHistory: Array.isArray(updated?.revisionHistory)
+              ? updated.revisionHistory
+              : p.revisionHistory,
+          }
+        : p
+    );
+
+    // Trigger the Post_Project_Creation API
     try {
-      const res = await fetch(UPDATE_STATUS_URL, {
+      const projectCreationPayload = {
+        proposalId: proposal.id,
+        leadId: proposal.leadId,
+        status: apiStatusFromUI(next),
+        clientName: proposal.clientName,
+        shootType: proposal.shootType,
+        eventDate: proposal.eventDate,
+        venue: proposal.venue,
+        // Add other fields as required by the Post_Project_Creation API
+      };
+
+      const projectRes = await fetch('https://mk93vwf9k3.execute-api.eu-north-1.amazonaws.com/default/Post_Project_Creation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(projectCreationPayload),
       });
 
-      const body = await res.json().catch(() => ({} as any));
+      const projectBody = await projectRes.json().catch(() => ({} as any));
 
-      if (!res.ok) {
-        // revert on failure
-        setProposalStatus(prev);
-        const msg = body?.error || `Failed to update status (${res.status})`;
-        showToastMessage(msg);
-        console.error('Update failed:', body);
+      if (!projectRes.ok) {
+        console.error('Post_Project_Creation failed:', projectBody);
+        showToastMessage('Status updated, but failed to trigger project creation.');
         return;
       }
 
-      // Success: update local proposal with whatever Lambda returned
-      const updated = body?.updated || {};
-      const nextStatus = uiStatusFromAPI(updated?.status) || next;
-
-      setProposalStatus(nextStatus);
-      setProposal((p) =>
-        p ? {
-          ...p,
-          status: nextStatus,
-          latestRevisionNote: updated?.latestRevisionNote ?? p.latestRevisionNote,
-          revisionHistory: Array.isArray(updated?.revisionHistory) ? updated.revisionHistory : p.revisionHistory,
-        } : p
-      );
-
-      showToastMessage(`Status updated to ${nextStatus.replace('_', ' ')}.`);
-    } catch (err) {
-      setProposalStatus(prev);
-      console.error(err);
-      showToastMessage('Network error while updating status.');
-    } finally {
-      setBusy(false);
+      showToastMessage(`Status updated to ${nextStatus.replace('_', ' ')} and project creation triggered.`);
+    } catch (projectErr) {
+      console.error('Post_Project_Creation network error:', projectErr);
+      showToastMessage('Status updated, but failed to trigger project creation due to network error.');
     }
+  } catch (err) {
+    setProposalStatus(prev);
+    console.error('Update status error:', err);
+    showToastMessage('Network error while updating status.');
+  } finally {
+    setBusy(false);
   }
+}
 
   const handleAccept = () => updateStatus('accepted');
   const handleDecline = () => updateStatus('declined');
