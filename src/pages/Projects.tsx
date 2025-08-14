@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
 import { Plus, Search, Eye, Calendar, Camera, User, Hash, Filter } from 'lucide-react';
@@ -22,61 +22,69 @@ function Projects() {
     status: '',
     search: ''
   });
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [projects] = useState<Project[]>([
-    {
-      id: '1',
-      projectId: 'PRJ-2024-001',
-      clientName: 'Sarah & John Wedding',
-      eventDate: '2024-03-15',
-      shootType: 'Wedding',
-      status: 'Upcoming',
-      venue: 'Goa Beach Resort',
-      createdDate: '2024-01-15'
-    },
-    {
-      id: '2',
-      projectId: 'PRJ-2024-002',
-      clientName: 'Raj & Priya Pre-Wedding',
-      eventDate: '2024-02-28',
-      shootType: 'Pre-Wedding',
-      status: 'In Progress',
-      venue: 'Mumbai Beach',
-      createdDate: '2024-01-20'
-    },
-    {
-      id: '3',
-      projectId: 'PRJ-2024-003',
-      clientName: 'Emma Maternity Shoot',
-      eventDate: '2024-02-10',
-      shootType: 'Maternity',
-      status: 'Completed',
-      venue: 'Studio Session',
-      createdDate: '2024-01-08'
-    },
-    {
-      id: '4',
-      projectId: 'PRJ-2024-004',
-      clientName: 'Corporate Event - TechCorp',
-      eventDate: '2024-03-20',
-      shootType: 'Corporate',
-      status: 'Upcoming',
-      venue: 'Mumbai Convention Center',
-      createdDate: '2024-01-25'
-    },
-    {
-      id: '5',
-      projectId: 'PRJ-2024-005',
-      clientName: 'Arjun Portrait Session',
-      eventDate: '2024-02-25',
-      shootType: 'Portrait',
-      status: 'In Progress',
-      venue: 'Outdoor Location',
-      createdDate: '2024-02-01'
+  const GET_PROJECTS_URL = 'https://vxxl9b57z2.execute-api.eu-north-1.amazonaws.com/default/Get_Project_Details';
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(GET_PROJECTS_URL, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch projects: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const apiProjects = Array.isArray(data.projects) ? data.projects : [];
+
+        // Map API data to Project interface
+        const mappedProjects: Project[] = apiProjects.map((item: any) => ({
+          id: item.projectId,
+          projectId: item.projectId,
+          clientName: item.clientName,
+          eventDate: item.eventDate,
+          shootType: item.shootType.split(',')[0].trim(), // Use first shoot type for simplicity
+          status: mapStatus(item.eventDate, item.validUntil),
+          venue: item.venue || 'Not specified', // Fallback if venue is missing
+          createdDate: item.createdAt.split('T')[0], // Extract date part
+        }));
+
+        setProjects(mappedProjects);
+      } catch (err) {
+        console.error('Error fetching projects:', err);
+        setError('Failed to load projects. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, []);
+
+  // Map API status to UI status based on eventDate and validUntil
+  const mapStatus = (eventDate: string, validUntil: string): 'Upcoming' | 'In Progress' | 'Completed' => {
+    const today = new Date();
+    const event = new Date(eventDate);
+    const valid = new Date(validUntil);
+
+    if (today > event) {
+      return 'Completed';
+    } else if (today <= valid && today <= event) {
+      return 'Upcoming';
+    } else {
+      return 'In Progress';
     }
-  ]);
+  };
 
-  const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events'];
+  const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events', 'Engagement', 'Reception', 'Anniversary'];
   const statusOptions = ['Upcoming', 'In Progress', 'Completed'];
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -218,140 +226,165 @@ function Projects() {
             </div>
           </div>
 
-          {/* Desktop Table View */}
-          <div className="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shoot Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredProjects.map((project) => (
-                    <tr 
-                      key={project.id} 
-                      className="hover:bg-gray-50 cursor-pointer transition-colors duration-200"
-                      onClick={() => window.location.href = `/projects/${project.id}`}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <Hash className="h-4 w-4 text-gray-400 mr-2" />
-                          <span className="text-sm font-medium text-[#2D2D2D]">{project.projectId}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <User className="h-4 w-4 text-gray-400 mr-2" />
-                          <div>
-                            <div className="text-sm font-medium text-[#2D2D2D]">{project.clientName}</div>
-                            <div className="text-sm text-gray-500">{project.venue}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <Calendar className="h-4 w-4 text-gray-400 mr-2" />
-                          <span className="text-sm text-[#2D2D2D]">
-                            {new Date(project.eventDate).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <Camera className="h-4 w-4 text-gray-400 mr-2" />
-                          <span className="text-sm text-[#2D2D2D]">{project.shootType}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(project.status)}`}>
-                          <span className="mr-1">{getStatusIcon(project.status)}</span>
-                          {project.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window.location.href = `/projects/${project.id}`;
-                          }}
-                          className="text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Loading State */}
+          {loading && (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#00BCEB] mx-auto"></div>
+              <p className="text-gray-500 text-lg mt-4">Loading projects...</p>
             </div>
+          )}
 
-            {/* Empty State */}
-            {filteredProjects.length === 0 && (
-              <div className="text-center py-12">
-                <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 text-lg">No projects found</p>
-                <p className="text-gray-400 text-sm">Try adjusting your filters or create a new project</p>
+          {/* Error State */}
+          {error && (
+            <div className="text-center py-12">
+              <p className="text-red-500 text-lg">{error}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-4 px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Desktop Table View */}
+          {!loading && !error && (
+            <div className="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shoot Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredProjects.map((project) => (
+                      <tr 
+                        key={project.id} 
+                        className="hover:bg-gray-50 cursor-pointer transition-colors duration-200"
+                        onClick={() => window.location.href = `/projects/${project.id}`}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <Hash className="h-4 w-4 text-gray-400 mr-2" />
+                            <span className="text-sm font-medium text-[#2D2D2D]">{project.projectId}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <User className="h-4 w-4 text-gray-400 mr-2" />
+                            <div>
+                              <div className="text-sm font-medium text-[#2D2D2D]">{project.clientName}</div>
+                              <div className="text-sm text-gray-500">{project.venue}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                            <span className="text-sm text-[#2D2D2D]">
+                              {new Date(project.eventDate).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <Camera className="h-4 w-4 text-gray-400 mr-2" />
+                            <span className="text-sm text-[#2D2D2D]">{project.shootType}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(project.status)}`}>
+                            <span className="mr-1">{getStatusIcon(project.status)}</span>
+                            {project.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.location.href = `/projects/${project.id}`;
+                            }}
+                            className="text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
+
+              {/* Empty State */}
+              {filteredProjects.length === 0 && (
+                <div className="text-center py-12">
+                  <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 text-lg">No projects found</p>
+                  <p className="text-gray-400 text-sm">Try adjusting your filters or create a new project</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Mobile Card View */}
-          <div className="md:hidden space-y-4">
-            {filteredProjects.map((project) => (
-              <div
-                key={project.id}
-                className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md transition-shadow duration-200"
-                onClick={() => window.location.href = `/projects/${project.id}`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center">
-                    <Hash className="h-4 w-4 text-gray-400 mr-2" />
-                    <span className="text-sm font-medium text-[#2D2D2D]">{project.projectId}</span>
-                  </div>
-                  <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(project.status)}`}>
-                    <span className="mr-1">{getStatusIcon(project.status)}</span>
-                    {project.status}
-                  </span>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center">
-                    <User className="h-4 w-4 text-gray-400 mr-2" />
-                    <span className="text-sm font-medium text-[#2D2D2D]">{project.clientName}</span>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <Calendar className="h-4 w-4 text-gray-400 mr-2" />
-                    <span className="text-sm text-gray-600">
-                      {new Date(project.eventDate).toLocaleDateString()}
+          {!loading && !error && (
+            <div className="md:hidden space-y-4">
+              {filteredProjects.map((project) => (
+                <div
+                  key={project.id}
+                  className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md transition-shadow duration-200"
+                  onClick={() => window.location.href = `/projects/${project.id}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center">
+                      <Hash className="h-4 w-4 text-gray-400 mr-2" />
+                      <span className="text-sm font-medium text-[#2D2D2D]">{project.projectId}</span>
+                    </div>
+                    <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(project.status)}`}>
+                      <span className="mr-1">{getStatusIcon(project.status)}</span>
+                      {project.status}
                     </span>
                   </div>
                   
-                  <div className="flex items-center">
-                    <Camera className="h-4 w-4 text-gray-400 mr-2" />
-                    <span className="text-sm text-gray-600">{project.shootType}</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center">
+                      <User className="h-4 w-4 text-gray-400 mr-2" />
+                      <span className="text-sm font-medium text-[#2D2D2D]">{project.clientName}</span>
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                      <span className="text-sm text-gray-600">
+                        {new Date(project.eventDate).toLocaleDateString()}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <Camera className="h-4 w-4 text-gray-400 mr-2" />
+                      <span className="text-sm text-gray-600">{project.shootType}</span>
+                    </div>
+                    
+                    <div className="text-sm text-gray-500">{project.venue}</div>
                   </div>
-                  
-                  <div className="text-sm text-gray-500">{project.venue}</div>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            {/* Mobile Empty State */}
-            {filteredProjects.length === 0 && (
-              <div className="text-center py-12">
-                <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 text-lg">No projects found</p>
-                <p className="text-gray-400 text-sm">Try adjusting your filters or create a new project</p>
-              </div>
-            )}
-          </div>
+              {/* Mobile Empty State */}
+              {filteredProjects.length === 0 && (
+                <div className="text-center py-12">
+                  <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 text-lg">No projects found</p>
+                  <p className="text-gray-400 text-sm">Try adjusting your filters or create a new project</p>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
     </div>
