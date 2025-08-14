@@ -34,7 +34,6 @@ function GalleryUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadMessages, setUploadMessages] = useState<string[]>([]);
 
-
   // Settings
   const [settings, setSettings] = useState({
     enableFaceTagging: false,
@@ -112,59 +111,87 @@ function GalleryUpload() {
     }));
   };
 
- const handleUpload = async () => {
-  if (uploadedFiles.length === 0) return;
-
-  setIsUploading(true);
-  setUploadProgress(0);
-  setUploadMessages([]);
-
-  const folder = `projects/gallery/${projectId}`;
-  const fileNames = uploadedFiles.map(file => file.file.name);
-
-  try {
-    // Step 1: Request presigned URLs
-    const response = await fetch("https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files: fileNames, folder })
-    });
-
-    const result = await response.json();
-    if (!result.success || result.urls.length !== uploadedFiles.length) {
-      setUploadMessages(["❌ Error: Mismatch in URL count"]);
-      setIsUploading(false);
+  const handleUpload = async () => {
+    if (uploadedFiles.length === 0) {
+      setUploadMessages(['❌ No files selected for upload']);
       return;
     }
 
-    // Step 2: Upload files in parallel
-    let completed = 0;
-    await Promise.all(uploadedFiles.map((fileObj, i) => {
-      const url = result.urls[i];
-      return fetch(url, {
-        method: "PUT",
-        body: fileObj.file
-      }).then(res => {
-        if (!res.ok) throw new Error(`Failed: ${fileObj.file.name}`);
-        completed++;
-        setUploadProgress(Math.round((completed / uploadedFiles.length) * 100));
-        setUploadMessages(prev => [...prev, `✅ ${fileObj.file.name} uploaded`]);
-      }).catch(err => {
-        setUploadMessages(prev => [...prev, `❌ ${fileObj.file.name} failed: ${err.message}`]);
-      });
-    }));
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadMessages([]);
 
-    setUploadMessages(prev => [...prev, `✅ Upload completed.`]);
+    const folder = `projects/gallery/${projectId}`;
+    const fileNames = uploadedFiles.map(file => file.file.name);
 
-    // Optional: Auto redirect
-    setTimeout(() => navigate('/gallery'), 2000);
-  } catch (err: any) {
-    setUploadMessages([`❌ Error: ${err.message}`]);
-  } finally {
-    setIsUploading(false);
-  }
-};
+    try {
+      // Step 1: Request presigned URLs
+      const response = await fetch(
+        'https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: fileNames,
+            folder,
+            projectId // Include projectId to match Lambda function expectations
+          })
+        }
+      );
 
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      // Validate response structure
+      if (!result || typeof result !== 'object') {
+        throw new Error('Invalid API response format');
+      }
+
+      // Extract URLs (support both `urls` and `uploads` for compatibility)
+      let urls = result.urls;
+      if (!urls && result.uploads) {
+        urls = result.uploads.map(item => item.url);
+      }
+
+      if (!result.success || !Array.isArray(urls) || urls.length !== uploadedFiles.length) {
+        throw new Error('Invalid or missing URLs in response');
+      }
+
+      // Step 2: Upload files in parallel
+      let completed = 0;
+      await Promise.all(
+        uploadedFiles.map((fileObj, i) => {
+          const url = urls[i];
+          return fetch(url, {
+            method: 'PUT',
+            body: fileObj.file,
+            headers: {
+              'Content-Type': fileObj.file.type // Set correct Content-Type
+            }
+          }).then(res => {
+            if (!res.ok) throw new Error(`Failed to upload: ${fileObj.file.name}`);
+            completed++;
+            setUploadProgress(Math.round((completed / uploadedFiles.length) * 100));
+            setUploadMessages(prev => [...prev, `✅ ${fileObj.file.name} uploaded`]);
+          }).catch(err => {
+            setUploadMessages(prev => [...prev, `❌ ${fileObj.file.name} failed: ${err.message}`]);
+            throw err; // Propagate error to fail Promise.all
+          });
+        })
+      );
+
+      setUploadMessages(prev => [...prev, '✅ Upload completed.']);
+      setTimeout(() => navigate('/gallery'), 2000);
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      setUploadMessages(prev => [...prev, `❌ Error: ${err.message}`]);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const isFormValid = () => {
     if (uploadedFiles.length === 0) return false;
@@ -254,9 +281,8 @@ function GalleryUpload() {
                 {isUploading && (
                   <div className="mt-4">
                     <div className="text-right text-sm text-gray-500">
-  Uploading {uploadProgress}% of {uploadedFiles.length} file(s)
-</div>
-
+                      Uploading {uploadProgress}% of {uploadedFiles.length} file(s)
+                    </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div
                         className="bg-[#00BCEB] h-2 rounded-full transition-all duration-300"
@@ -266,15 +292,14 @@ function GalleryUpload() {
                   </div>
                 )}
                 {uploadMessages.length > 0 && (
-  <div className="mt-4 space-y-1 text-sm">
-    {uploadMessages.map((msg, index) => (
-      <p key={index} className={msg.startsWith("✅") ? "text-green-600" : "text-red-600"}>
-        {msg}
-      </p>
-    ))}
-  </div>
-)}
-
+                  <div className="mt-4 space-y-1 text-sm">
+                    {uploadMessages.map((msg, index) => (
+                      <p key={index} className={msg.startsWith("✅") ? "text-green-600" : "text-red-600"}>
+                        {msg}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Uploaded Files Preview */}

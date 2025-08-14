@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
@@ -79,24 +79,89 @@ function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-const isCreating = !id; 
-const [isEditing, setIsEditing] = useState(isCreating);
+  const isCreating = !id;
+  const [isEditing, setIsEditing] = useState(isCreating);
+  const [project, setProject] = useState<Project>({
+    id: '',
+    projectId: '',
+    clientName: '',
+    shootType: '',
+    eventDate: '',
+    status: 'Upcoming',
+    venue: '',
+    budget: 0,
+    notes: '',
+    source: ''
+  });
+  const [loading, setLoading] = useState(!isCreating);
+  const [error, setError] = useState<string | null>(null);
 
+  const GET_PROJECTS_URL = 'https://vxxl9b57z2.execute-api.eu-north-1.amazonaws.com/default/Get_Project_Details';
 
-  // Mock project data
-const [project, setProject] = useState<Project>({
-  id: '',
-  projectId: '',
-  clientName: '',
-  shootType: '',
-  eventDate: '',
-  status: 'Upcoming',
-  venue: '',
-  budget: 0,
-  notes: '',
-  source: ''
-});
+  useEffect(() => {
+    if (isCreating) return; // Skip fetch for new project creation
 
+    const fetchProject = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(GET_PROJECTS_URL, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch project: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const apiProjects = Array.isArray(data.projects) ? data.projects : [];
+        const matchedProject = apiProjects.find((item: any) => item.projectId === id);
+
+        if (!matchedProject) {
+          throw new Error(`Project with ID ${id} not found`);
+        }
+
+        // Map API data to Project interface
+        const mappedProject: Project = {
+          id: matchedProject.projectId,
+          projectId: matchedProject.projectId,
+          clientName: matchedProject.clientName,
+          shootType: matchedProject.shootType.split(',')[0].trim(), // Use first shoot type
+          eventDate: matchedProject.eventDate,
+          status: mapStatus(matchedProject.eventDate, matchedProject.validUntil),
+          venue: matchedProject.venue || 'Not specified', // Fallback if venue is missing
+          budget: matchedProject.totalAmount,
+          notes: matchedProject.notes,
+          source: matchedProject.source || 'Not specified' // Fallback if source is missing
+        };
+
+        setProject(mappedProject);
+      } catch (err) {
+        console.error('Error fetching project:', err);
+        setError('Failed to load project details. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProject();
+  }, [id, isCreating]);
+
+  // Map API status to UI status based on eventDate and validUntil
+  const mapStatus = (eventDate: string, validUntil: string): 'Upcoming' | 'In Progress' | 'Completed' => {
+    const today = new Date();
+    const event = new Date(eventDate);
+    const valid = new Date(validUntil);
+
+    if (today > event) {
+      return 'Completed';
+    } else if (today <= valid && today <= event) {
+      return 'Upcoming';
+    } else {
+      return 'In Progress';
+    }
+  };
 
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([
     {
@@ -204,7 +269,7 @@ const [project, setProject] = useState<Project>({
 
   const handleSaveProject = () => {
     setIsEditing(false);
-    // In real app, save to backend
+    // In real app, save to backend (e.g., call Post_Project_Creation API)
   };
 
   const handleAssignTeamMember = (memberId: string) => {
@@ -222,6 +287,7 @@ const [project, setProject] = useState<Project>({
 
   const handleMarkCompleted = () => {
     setProject(prev => ({ ...prev, status: 'Completed' }));
+    // In real app, update status in backend
   };
 
   const getStatusColor = (status: string) => {
@@ -243,6 +309,30 @@ const [project, setProject] = useState<Project>({
   };
 
   const renderTabContent = () => {
+    if (loading) {
+      return (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#00BCEB] mx-auto"></div>
+          <p className="text-gray-500 text-lg mt-4">Loading project details...</p>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-12">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <p className="text-red-500 text-lg">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'overview':
         return (
@@ -290,7 +380,7 @@ const [project, setProject] = useState<Project>({
                       className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
-                    <p className="text-[#2D2D2D] font-medium">{project.clientName}</p>
+                    <p className="text-[#2D2D2D] font-medium">{project.clientName || '-'}</p>
                   )}
                 </div>
 
@@ -301,7 +391,7 @@ const [project, setProject] = useState<Project>({
                     <input
                       type="number"
                       value={project.budget}
-                      onChange={(e) => setProject(prev => ({ ...prev, budget: parseInt(e.target.value) }))}
+                      onChange={(e) => setProject(prev => ({ ...prev, budget: parseInt(e.target.value) || 0 }))}
                       className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
@@ -325,7 +415,7 @@ const [project, setProject] = useState<Project>({
                       <option value="Walk-in">Walk-in</option>
                     </select>
                   ) : (
-                    <p className="text-[#2D2D2D] font-medium">{project.source}</p>
+                    <p className="text-[#2D2D2D] font-medium">{project.source || '-'}</p>
                   )}
                 </div>
               </div>
@@ -342,7 +432,7 @@ const [project, setProject] = useState<Project>({
                       className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
                     />
                   ) : (
-                    <p className="text-[#2D2D2D] font-medium">{project.venue}</p>
+                    <p className="text-[#2D2D2D] font-medium">{project.venue || '-'}</p>
                   )}
                 </div>
 
@@ -398,7 +488,7 @@ const [project, setProject] = useState<Project>({
                   className="w-full px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] resize-none"
                 />
               ) : (
-                <p className="text-[#2D2D2D] leading-relaxed">{project.notes}</p>
+                <p className="text-[#2D2D2D] leading-relaxed">{project.notes || '-'}</p>
               )}
             </div>
           </div>
@@ -581,11 +671,11 @@ const [project, setProject] = useState<Project>({
                   <p className="text-sm text-gray-600">Total Amount</p>
                 </div>
                 <div className="text-center p-4 bg-green-50 rounded-lg">
-                  <p className="text-2xl font-bold text-green-600">₹62,500</p>
+                  <p className="text-2xl font-bold text-green-600">₹{(project.budget / 2).toLocaleString()}</p>
                   <p className="text-sm text-gray-600">Paid</p>
                 </div>
                 <div className="text-center p-4 bg-[#FF6B00]/5 rounded-lg">
-                  <p className="text-2xl font-bold text-[#FF6B00]">₹62,500</p>
+                  <p className="text-2xl font-bold text-[#FF6B00]">₹{(project.budget / 2).toLocaleString()}</p>
                   <p className="text-sm text-gray-600">Pending</p>
                 </div>
               </div>
@@ -656,12 +746,14 @@ const [project, setProject] = useState<Project>({
                 <div className="flex items-center space-x-4 mt-2">
                   <div className="flex items-center text-gray-600">
                     <Calendar className="h-4 w-4 mr-2" />
-                    {new Date(project.eventDate).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
+                    {project.eventDate
+                      ? new Date(project.eventDate).toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })
+                      : '-'}
                   </div>
                   <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(project.status)}`}>
                     {project.status}
