@@ -110,18 +110,20 @@ function App() {
           path="/gallery"
           element={isAuthenticated ? <Gallery /> : <Navigate to="/login" replace />}
         />
-        <Route
-          path="/gallery/upload/:projectId"
-          element={isAuthenticated ? <GalleryUpload /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/client-gallery/:galleryId"
-          element={isAuthenticated ? <ClientGallery /> : <Navigate to="/login" replace />}
-        />
+      <Route
+  path="/gallery/upload/:projectId"
+  element={isAuthenticated ? <GalleryUpload /> : <Navigate to="/login" replace />}
+/>
+       <Route
+  path="/client-gallery/:galleryId/*"
+  element={isAuthenticated ? <ClientGallery /> : <Navigate to="/login" replace />}
+/>
+ <Route path="/gallery/*" element={isAuthenticated ? <Gallery /> : <Navigate to="/login" replace />} />
         <Route
           path="/clients"
           element={isAuthenticated ? <Clients /> : <Navigate to="/login" replace />}
         />
+        
         <Route
           path="/clients/:id"
           element={isAuthenticated ? <div>Client Profile - Coming Soon</div> : <Navigate to="/login" replace />}
