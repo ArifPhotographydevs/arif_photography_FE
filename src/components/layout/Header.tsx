@@ -66,7 +66,7 @@ function Header({ title, sidebarCollapsed }: HeaderProps) {
 
         <div className="flex items-center space-x-4">
           {/* Notifications */}
-          <div className="relative">
+          {/* <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
               className="relative text-gray-500 hover:text-[#00BCEB] transition-colors"
@@ -95,9 +95,9 @@ function Header({ title, sidebarCollapsed }: HeaderProps) {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              </div> */}
+            {/* )}
+          </div> */}
 
           {/* Profile Menu */}
           <div className="relative">

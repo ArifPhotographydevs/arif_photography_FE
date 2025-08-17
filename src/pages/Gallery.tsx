@@ -145,7 +145,7 @@ function Gallery() {
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events', 'Casual', 'Unknown'];
+  const validShootTypes = ['engagement', 'wedding', 'pre-wedding', 'reception'];
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -1165,7 +1165,7 @@ function Gallery() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
       </div>
     </GalleryErrorBoundary>
