@@ -73,6 +73,11 @@ function Calendar() {
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
+  const shortMonthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Valid shoot types
@@ -170,6 +175,16 @@ function Calendar() {
     setCurrentDate(newDate);
   };
 
+  const navigateWeek = (direction: 'prev' | 'next') => {
+    const newDate = new Date(currentDate);
+    if (direction === 'prev') {
+      newDate.setDate(currentDate.getDate() - 7);
+    } else {
+      newDate.setDate(currentDate.getDate() + 7);
+    }
+    setCurrentDate(newDate);
+  };
+
   const goToToday = () => {
     setCurrentDate(new Date());
   };
@@ -190,6 +205,21 @@ function Calendar() {
     
     for (let day = 1; day <= daysInMonth; day++) {
       days.push(new Date(year, month, day));
+    }
+    
+    return days;
+  };
+
+  const getDaysInWeek = (date: Date) => {
+    const days = [];
+    const startOfWeek = new Date(date);
+    // Set to the start of the week (Sunday)
+    startOfWeek.setDate(date.getDate() - date.getDay());
+    
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+      days.push(day);
     }
     
     return days;
@@ -236,7 +266,7 @@ function Calendar() {
     navigate('/projects/new');
   };
 
-  const days = getDaysInMonth(currentDate);
+  const days = viewMode === 'month' ? getDaysInMonth(currentDate) : getDaysInWeek(currentDate);
 
   return (
     <CalendarErrorBoundary>
@@ -315,7 +345,7 @@ function Calendar() {
                   {/* Right: Navigation */}
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => navigateMonth('prev')}
+                      onClick={() => viewMode === 'month' ? navigateMonth('prev') : navigateWeek('prev')}
                       className="p-2 text-gray-600 hover:text-[#00BCEB] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
                     >
                       <ChevronLeft className="h-5 w-5" />
@@ -329,7 +359,7 @@ function Calendar() {
                     </button>
                     
                     <button
-                      onClick={() => navigateMonth('next')}
+                      onClick={() => viewMode === 'month' ? navigateMonth('next') : navigateWeek('next')}
                       className="p-2 text-gray-600 hover:text-[#00BCEB] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
                     >
                       <ChevronRight className="h-5 w-5" />
@@ -337,10 +367,19 @@ function Calendar() {
                   </div>
                 </div>
 
-                {/* Current Month/Year */}
+                {/* Current Month/Year or Week Range */}
                 <div className="mt-4 text-center">
                   <h3 className="text-xl font-semibold text-[#2D2D2D]">
-                    {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+                    {viewMode === 'month'
+                      ? `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`
+                      : (() => {
+                          const startOfWeek = new Date(currentDate);
+                          startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
+                          const endOfWeek = new Date(startOfWeek);
+                          endOfWeek.setDate(startOfWeek.getDate() + 6);
+                          return `${monthNames[startOfWeek.getMonth()]} ${startOfWeek.getDate()}, ${startOfWeek.getFullYear()} - ${monthNames[endOfWeek.getMonth()]} ${endOfWeek.getDate()}, ${endOfWeek.getFullYear()}`;
+                        })()
+                    }
                   </h3>
                 </div>
               </div>
@@ -360,7 +399,7 @@ function Calendar() {
 
                 {/* Calendar Body */}
                 <AnimatePresence>
-                  <div className="grid grid-cols-7">
+                  <div className={`grid ${viewMode === 'month' ? 'grid-cols-7' : 'grid-cols-7'}`}>
                     {days.map((date, index) => {
                       const dayEvents = getEventsForDate(date);
                       const isCurrentDay = isToday(date);
@@ -373,13 +412,13 @@ function Calendar() {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.2 }}
-                          className={`border-r border-b border-gray-200 p-3 min-h-[140px] relative ${
+                          className={`border-r border-b border-gray-200 p-3 min-h-[${viewMode === 'month' ? '140px' : '200px'}] relative ${
                             isPast ? 'bg-gray-50' : 'bg-white'
                           } ${isCurrentDay ? 'bg-[#00BCEB]/5 border-[#00BCEB]' : ''}`}
                         >
                           {date && (
                             <>
-                              {/* Date Number */}
+                              {/* Date Number with Month */}
                               <div className={`text-sm font-medium mb-2 flex items-center justify-between ${
                                 isCurrentDay 
                                   ? 'text-[#00BCEB] font-bold' 
@@ -387,7 +426,7 @@ function Calendar() {
                                   ? 'text-gray-400' 
                                   : 'text-[#2D2D2D]'
                               }`}>
-                                <span>{date.getDate()}</span>
+                                <span>{`${shortMonthNames[date.getMonth()]} ${date.getDate()}`}</span>
                                 {isCurrentDay && (
                                   <span className="text-xs bg-[#00BCEB] text-white px-2 py-1 rounded-full">
                                     Today
@@ -397,7 +436,7 @@ function Calendar() {
 
                               {/* Events */}
                               <div className="space-y-2">
-                                {dayEvents.slice(0, 3).map((event) => (
+                                {dayEvents.slice(0, viewMode === 'month' ? 3 : 5).map((event) => (
                                   <motion.div
                                     key={event.id}
                                     onClick={() => handleEventClick(event)}
@@ -420,9 +459,9 @@ function Calendar() {
                                     </div>
                                   </motion.div>
                                 ))}
-                                {dayEvents.length > 3 && (
+                                {dayEvents.length > (viewMode === 'month' ? 3 : 5) && (
                                   <div className="text-xs text-gray-500 px-3">
-                                    +{dayEvents.length - 3} more
+                                    +{dayEvents.length - (viewMode === 'month' ? 3 : 5)} more
                                   </div>
                                 )}
                               </div>
