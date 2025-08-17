@@ -145,7 +145,7 @@ function Gallery() {
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validShootTypes = ['engagement', 'wedding', 'pre-wedding', 'reception'];
+  const shootTypes = ['Wedding', 'Pre-Wedding', 'Maternity', 'Corporate', 'Portrait', 'Events', 'Casual', 'Unknown'];
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -1128,11 +1128,6 @@ function Gallery() {
                     </div>
                   )}
                 </div>
-
-                {/* File List (as before) */}
-                {/* {uploadFiles.length > 0 && (
-                  // ... (keep your existing file list code)
-                )} */}
               </div>
 
               {/* Footer with Start Upload button calling startUpload */}
@@ -1165,7 +1160,7 @@ function Gallery() {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
       </div>
     </GalleryErrorBoundary>
