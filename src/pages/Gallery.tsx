@@ -1128,11 +1128,6 @@ function Gallery() {
                     </div>
                   )}
                 </div>
-
-                {/* File List (as before) */}
-                {/* {uploadFiles.length > 0 && (
-                  // ... (keep your existing file list code)
-                )} */}
               </div>
 
               {/* Footer with Start Upload button calling startUpload */}
