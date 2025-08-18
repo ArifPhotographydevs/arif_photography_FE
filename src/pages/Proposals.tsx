@@ -273,13 +273,13 @@ function Proposals() {
               <h2 className="text-2xl font-bold text-[#2D2D2D]">Proposals Management</h2>
               <p className="text-gray-600 mt-1">Track and manage all your photography proposals</p>
             </div>
-            <button
+            {/* <button
               onClick={() => (window.location.href = '/proposals/create')}
               className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               <Plus className="h-4 w-4 mr-2" />
               Create Proposal
-            </button>
+            </button> */}
           </div>
 
           {/* Stats */}

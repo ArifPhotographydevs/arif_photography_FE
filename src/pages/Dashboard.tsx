@@ -225,9 +225,9 @@ function Dashboard() {
   ];
 
   const quickActions = [
-    { name: 'Add Lead', icon: Plus, path: '/leads/create', primary: true },
-    { name: 'Create Proposal', icon: FileText, path: '/proposals/create', primary: false },
-    { name: 'Upload Gallery', icon: Camera, path: '/gallery/upload', primary: false }
+    { name: 'Add Lead', icon: Plus, path: '/leads', primary: true },
+    { name: 'Create Proposal', icon: FileText, path: '/proposals', primary: false },
+    { name: 'Upload Gallery', icon: Camera, path: '/gallery', primary: false }
   ];
 
   return (
@@ -239,7 +239,7 @@ function Dashboard() {
       <div className={`flex-1 transition-all duration-300 ease-in-out ${
         sidebarCollapsed ? 'ml-16' : 'ml-64'
       }`}>
-        {/* Header */}
+        Header
         <Header title="Dashboard" sidebarCollapsed={sidebarCollapsed} />
 
         {/* Main Dashboard Content */}
@@ -307,55 +307,8 @@ function Dashboard() {
             })}
           </div>
 
-          {/* Recent Activity */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-            <div className="p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-[#2D2D2D]">Recent Activity</h3>
-            </div>
-            <div className="p-6">
-              <div className="space-y-4">
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-[#00BCEB]/10 rounded-full flex items-center justify-center">
-                    <Camera className="h-5 w-5 text-[#00BCEB]" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-[#2D2D2D]">Wedding shoot completed for Sarah & John</p>
-                    <p className="text-xs text-gray-500">2 hours ago</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-[#FF6B00]/10 rounded-full flex items-center justify-center">
-                    <Users className="h-5 w-5 text-[#FF6B00]" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-[#2D2D2D]">New lead: Emma Wilson added</p>
-                    <p className="text-xs text-gray-500">5 hours ago</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                    <DollarSign className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-[#2D2D2D]">Payment received: ₹25,000 from Raj Studios</p>
-                    <p className="text-xs text-gray-500">1 day ago</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-[#00BCEB]/10 rounded-full flex items-center justify-center">
-                    <Calendar className="h-5 w-5 text-[#00BCEB]" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-[#2D2D2D]">Portrait session scheduled for tomorrow</p>
-                    <p className="text-xs text-gray-500">1 day ago</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          
+          
         </main>
       </div>
     </div>

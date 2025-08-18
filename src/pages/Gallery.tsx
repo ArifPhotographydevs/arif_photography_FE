@@ -96,6 +96,11 @@ class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { ha
     return this.props.children;
   }
 }
+interface DeleteError {
+  Key: string;
+  Code?: string;
+  Message: string;
+}
 
 function Gallery() {
   const navigate = useNavigate();
@@ -107,10 +112,12 @@ function Gallery() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
+    const [deleteLoading, setDeleteLoading] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
   
   // Modal states
   const [previewModal, setPreviewModal] = useState<{
@@ -350,10 +357,90 @@ function Gallery() {
     ));
   };
 
-  const handleDelete = (itemId: string) => {
-    if (window.confirm('Are you sure you want to delete this image?')) {
-      setItems(prev => prev.filter(item => item.id !== itemId));
+  const handleDeleteImages = async (itemIds: string[]) => {
+  if (itemIds.length === 0) {
+    setError('No items selected for deletion');
+    return;
+  }
+
+  const itemsToDelete = items.filter(item => itemIds.includes(item.id));
+  const confirmMessage = itemIds.length === 1 
+    ? `Are you sure you want to delete "${itemsToDelete[0]?.title}"?`
+    : `Are you sure you want to delete ${itemIds.length} image(s)?`;
+
+  if (!window.confirm(confirmMessage)) return;
+
+  try {
+    setDeleteLoading(itemIds);
+    setError(null);
+    setDeleteErrors([]);
+
+    const itemsToDeleteLog = itemsToDelete.map(item => ({ id: item.id, key: item.key }));
+    console.log('Items to delete:', itemsToDeleteLog);
+
+    const keys = itemsToDelete
+      .map(item => item.key)
+      .filter((key): key is string => typeof key === 'string' && key.trim() !== '');
+
+    console.log('Extracted keys:', keys);
+
+    if (keys.length === 0) {
+      throw new Error('No valid keys found for deletion');
     }
+
+    console.log('Sending delete request with keys:', keys);
+
+    const response = await fetch(
+      'https://9qvci31498.execute-api.eu-north-1.amazonaws.com/default/deleteimage',
+      {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ keys }) // Payload formatted as { "keys": ["key1", "key2", ...] }
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Delete request failed: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.message || 'Delete operation failed');
+    }
+
+    const deletedKeys = result.deleted || [];
+    const errors: DeleteError[] = result.errors || [];
+    const deletedItems = itemsToDelete.filter(item => deletedKeys.includes(item.key));
+
+    setItems(prev => prev.filter(item => !deletedItems.some(d => d.id === item.id)));
+    setSelectedItems(prev => prev.filter(id => !deletedItems.some(d => d.id === id)));
+
+    if (errors.length > 0) {
+      setDeleteErrors(errors);
+      setError(`Partially completed: ${deletedKeys.length} deleted, ${errors.length} failed. See details below.`);
+      console.warn('Delete errors:', errors);
+    } else {
+      console.log(`Successfully deleted ${deletedKeys.length} image(s)`);
+    }
+
+  } catch (err: any) {
+    console.error('Error deleting images:', err);
+    setError(`Failed to delete images: ${err.message}`);
+  } finally {
+    setDeleteLoading([]);
+  }
+};
+
+  const handleDelete = (itemId: string) => {
+    handleDeleteImages([itemId]);
+  };
+
+  const handleBulkDelete = () => {
+    handleDeleteImages(selectedItems);
   };
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -568,6 +655,13 @@ function Gallery() {
                       >
                         <Share2 className="w-4 h-4 inline mr-1" />
                         Share
+                      </button>
+                      <button
+                        onClick={handleBulkDelete}
+                        className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200 text-sm"
+                      >
+                        <Trash2 className="w-4 h-4 inline mr-1" />
+                        Delete
                       </button>
                       <button
                         onClick={handleClearSelection}

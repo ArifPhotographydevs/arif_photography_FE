@@ -30,12 +30,12 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: 'Projects', icon: Camera, path: '/projects' },
     { name: 'Calendar', icon: Calendar, path: '/calendar' },
     { name: 'Gallery', icon: Eye, path: '/gallery' },
-    { name: 'Clients', icon: UserCheck, path: '/clients' },
+    // { name: 'Clients', icon: UserCheck, path: '/clients' },
     { name: 'Proposals', icon: FileText, path: '/proposals' },
     // { name: 'Finance', icon: DollarSign, path: '/finance' },
     { name: 'Team', icon: Users, path: '/team' },
-    { name: 'Analytics', icon: BarChart3, path: '/analytics' },
-    { name: 'Activity Logs', icon: Activity, path: '/activity-logs' },
+    // { name: 'Analytics', icon: BarChart3, path: '/analytics' },
+    // { name: 'Activity Logs', icon: Activity, path: '/activity-logs' },
     { name: 'Settings', icon: Settings, path: '/settings' },
   ];
 
