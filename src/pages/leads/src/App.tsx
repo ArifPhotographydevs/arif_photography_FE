@@ -704,7 +704,7 @@ const handleSubmit = async () => {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 mt-12">
+      {/* <footer className="bg-white border-t border-gray-200 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div>
@@ -712,14 +712,14 @@ const handleSubmit = async () => {
                 <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-orange-500 rounded-lg flex items-center justify-center">
                   <Camera className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-lg font-semibold text-gray-800">PhotoStudio</span>
+                <span className="text-lg font-semibold text-gray-800">Arif Photography</span>
               </div>
               <p className="text-gray-600 text-sm">
                 Capturing life's most precious moments with artistic vision and professional expertise.
               </p>
-            </div>
+            </div> */}
             
-            <div>
+            {/* <div>
               <h3 className="text-sm font-semibold text-gray-800 mb-4">Contact Information</h3>
               <div className="space-y-2">
                 <div className="flex items-center text-sm text-gray-600">
@@ -735,9 +735,9 @@ const handleSubmit = async () => {
                   123 Photography Lane, Studio City
                 </div>
               </div>
-            </div>
+            </div> */}
 
-            <div>
+            {/* <div>
               <h3 className="text-sm font-semibold text-gray-800 mb-4">Follow Us</h3>
               <div className="flex space-x-4">
                 <a href="#" className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center hover:bg-blue-100 transition-colors">
@@ -755,11 +755,11 @@ const handleSubmit = async () => {
           
           <div className="border-t border-gray-200 mt-8 pt-6 text-center">
             <p className="text-sm text-gray-600">
-              © 2025 PhotoStudio. All rights reserved.
+              © 2025 . All rights reserved.
             </p>
           </div>
         </div>
-      </footer>
+      </footer> */}
     </div>
   );
 }

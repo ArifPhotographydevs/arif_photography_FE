@@ -150,13 +150,13 @@ function Projects() {
               <h2 className="text-2xl font-bold text-[#2D2D2D]">Projects</h2>
               <p className="text-gray-600 mt-1">Manage your photography projects and track progress</p>
             </div>
-            <button
+            {/* <button
               onClick={() => window.location.href = '/projects/create'}
               className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               <Plus className="h-4 w-4 mr-2" />
               New Project
-            </button>
+            </button> */}
           </div>
 
           {/* Filters Row */}
@@ -178,7 +178,7 @@ function Projects() {
               </div>
 
               {/* Shoot Type Filter */}
-              <div>
+              {/* <div>
                 <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Shoot Type</label>
                 <select
                   value={filters.shootType}
@@ -190,7 +190,7 @@ function Projects() {
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
-              </div>
+              </div> */}
 
               {/* Status Filter */}
               <div>

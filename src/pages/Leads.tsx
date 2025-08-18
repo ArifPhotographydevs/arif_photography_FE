@@ -3,6 +3,7 @@ import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
 import { Plus, Search, Filter, Eye, Calendar, X, User, Mail, Phone, Camera, DollarSign, FileText } from 'lucide-react';
 import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface Lead {
   id: string;
@@ -26,8 +27,8 @@ interface LeadFormData {
   eventDate: string;
   notes: string;
 }
-
 function Leads() {
+  const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filters, setFilters] = useState({
@@ -37,6 +38,7 @@ function Leads() {
     search: ''
   });
   
+
 useEffect(() => {
   const fetchLeads = async () => {
     try {
@@ -135,29 +137,6 @@ useEffect(() => {
     return formData.name && formData.email && formData.phone && formData.shootType && formData.budget;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isFormValid()) return;
-
-    const newLead: Lead = {
-      id: Date.now().toString(),
-      ...formData,
-      status: 'New',
-      createdDate: new Date().toISOString().split('T')[0]
-    };
-
-    setLeads(prev => [newLead, ...prev]);
-    setFormData({
-      name: '',
-      email: '',
-      phone: '',
-      shootType: '',
-      budget: '',
-      eventDate: '',
-      notes: ''
-    });
-    setShowAddModal(false);
-  };
 
   const filteredLeads = leads.filter(lead => {
     const matchesShootType = !filters.shootType || lead.shootType === filters.shootType;
@@ -203,27 +182,27 @@ useEffect(() => {
 
         {/* Main Content */}
         <main className="pt-16 p-6">
-          {/* Top Section */}
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-bold text-[#2D2D2D]">All Leads</h2>
-              <p className="text-gray-600 mt-1">Manage and track your photography leads</p>
-            </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Lead
-            </button>
-          </div>
+  {/* Top Section */}
+  <div className="flex items-center justify-between mb-6">
+    <div>
+      <h2 className="text-2xl font-bold text-[#2D2D2D]">All Leads</h2>
+      <p className="text-gray-600 mt-1">Manage and track your photography leads</p>
+    </div>
+    <button
+      className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+      onClick={() => navigate('/leadform')}
+    >
+      <Plus className="h-4 w-4 mr-2" />
+      Add Lead
+    </button>
+  </div>
 
           {/* Filters Row */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               {/* Shoot Type Filter */}
               <div>
-                <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Shoot Type</label>
+                {/* <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Shoot Type</label>
                 <select
                   value={filters.shootType}
                   onChange={(e) => handleFilterChange('shootType', e.target.value)}
@@ -233,12 +212,12 @@ useEffect(() => {
                   {shootTypes.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
-                </select>
+                </select> */}
               </div>
 
               {/* Budget Filter */}
               <div>
-                <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Budget Range</label>
+                {/* <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Budget Range</label>
                 <select
                   value={filters.budget}
                   onChange={(e) => handleFilterChange('budget', e.target.value)}
@@ -248,12 +227,12 @@ useEffect(() => {
                   {budgetRanges.map(budget => (
                     <option key={budget} value={budget}>{budget}</option>
                   ))}
-                </select>
+                </select> */}
               </div>
 
               {/* Status Filter */}
               <div>
-                <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Status</label>
+                {/* <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Status</label>
                 <select
                   value={filters.status}
                   onChange={(e) => handleFilterChange('status', e.target.value)}
@@ -263,7 +242,7 @@ useEffect(() => {
                   {statusOptions.map(status => (
                     <option key={status} value={status}>{status}</option>
                   ))}
-                </select>
+                </select> */}
               </div>
 
               {/* Search */}
