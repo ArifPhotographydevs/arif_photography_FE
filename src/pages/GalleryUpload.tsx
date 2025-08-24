@@ -570,7 +570,7 @@ const handleDeleteImages = async (itemIds: string[]) => {
                 </nav>
               </div>
               
-              <div className="flex items-center space-x-3">
+{/*               <div className="flex items-center space-x-3">
                 <button 
                   onClick={() => setUploadModal(true)}
                   className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
@@ -578,7 +578,7 @@ const handleDeleteImages = async (itemIds: string[]) => {
                   <Plus className="h-4 w-4 mr-2" />
                   Upload New
                 </button>
-              </div>
+              </div> */}
             </div>
 
             {/* Toolbar */}
