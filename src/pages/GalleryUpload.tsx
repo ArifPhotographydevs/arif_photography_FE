@@ -793,5 +793,4 @@ function GalleryUpload() {
     </div>
   );
 }
-
-export default GalleryUpload;
+export default GalleryUpload
