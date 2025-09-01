@@ -1,1255 +1,797 @@
-import React, { useState, useEffect, Component, ErrorInfo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
-import {
-  Plus,
-  Search,
-  Eye,
-  Trash2,
-  Image,
-  Calendar,
-  Camera,
-  Download,
-  Share2,
-  Loader2,
+import { 
+  ArrowLeft, 
+  Upload, 
+  X, 
+  Eye, 
+  EyeOff, 
+  Lock, 
   AlertCircle,
-  Folder,
-  ArrowLeft,
-  Grid3X3,
-  List,
-  Filter,
-  SortAsc,
-  SortDesc,
-  Star,
-  Heart,
-  ChevronRight,
-  Home,
-  X,
-  Copy,
-  Mail,
-  FolderPlus,
-  Play,
+  Loader2
 } from 'lucide-react';
 
-interface GalleryItem {
+interface UploadedFile {
   id: string;
-  shootType: string;
-  eventDate: string;
-  imageUrl: string;
-  title: string;
-  uploadDate: string;
-  isWatermarked: boolean;
-  isPinProtected: boolean;
-  isFavorite?: boolean;
-  key?: string;
-  isVideo?: boolean;
-}
-
-interface FolderItem {
-  name: string;
-  path: string;
-}
-
-interface UploadFile {
   file: File;
+  preview: string;
+  title: string;
+  watermarkedFile?: File; // Add watermarked file to store the processed image
+}
+
+interface ProjectData {
   id: string;
-  progress: number;
-  status: 'pending' | 'uploading' | 'completed' | 'error';
-  error?: string;
+  title: string;
+  clientName: string;
+  eventDate?: string;
+  eventType?: string;
 }
 
-interface DeleteError {
-  Key: string;
-  Code?: string;
-  Message: string;
-}
-
-interface Notification {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-}
-
-class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError(_: Error): { hasError: boolean } {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Error in Gallery component:', error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="text-center py-12">
-          <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-[#2D2D2D] mb-2">Something went wrong</h3>
-          <p className="text-gray-500">Please try refreshing the page or contact support.</p>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-function Gallery() {
+function GalleryUpload() {
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
-  const currentPath = location.pathname.replace('/gallery', '');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [items, setItems] = useState<GalleryItem[]>([]);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deleteLoading, setDeleteLoading] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
-  const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
-  const [previewModal, setPreviewModal] = useState<{
-    isOpen: boolean;
-    currentImage: GalleryItem | null;
-  }>({ isOpen: false, currentImage: null });
-  const [shareModal, setShareModal] = useState(false);
-  const [createFolderModal, setCreateFolderModal] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [filters, setFilters] = useState({
-    month: '',
-    shootType: '',
-    search: '',
-    favorites: false,
-    watermarked: false,
-    pinProtected: false,
-  });
-  const [sortBy, setSortBy] = useState('uploadDate');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadMessages, setUploadMessages] = useState<string[]>([]);
+  const [projectData, setProjectData] = useState<ProjectData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const shootTypes = [
-    'Wedding',
-    'Pre-Wedding',
-    'Maternity',
-    'Corporate',
-    'Portrait',
-    'Events',
-    'Casual',
-    'Unknown',
-  ];
-  const months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
+  const [settings, setSettings] = useState({
+    enableFaceTagging: false,
+    applyWatermark: true,
+    protectWithPin: false,
+    pin: ''
+  });
 
-  // Add notification with auto-dismiss
-  const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setNotifications((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    }, 5000);
+  const [showPin, setShowPin] = useState(false);
+
+  // API endpoints
+  const GET_PROJECT_BY_ID_URL = `https://vxxl9b57z2.execute-api.eu-north-1.amazonaws.com/default/Get_Project_Details/${projectId}`;
+  const UPLOAD_URL = 'https://07itmms5r4.execute-api.eu-north-1.amazonaws.com/default/imagesupload';
+
+  // UUID validation regex
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const isDev = process.env.NODE_ENV === 'development';
+
+  // Sanitize folder name to remove special characters and ensure S3 compatibility
+  const sanitizeFolderName = (name: string) => {
+    return name
+      .replace(/[^a-zA-Z0-9-_]/g, '_') // Replace special characters with underscores
+      .replace(/_+/g, '_') // Replace multiple underscores with a single one
+      .toLowerCase()
+      .slice(0, 100); // Limit length to avoid S3 path issues
   };
 
-  // Fetch gallery items based on current path (prefix)
+  // Function to add image watermark to an image
+  const addWatermark = async (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const watermarkImg = new Image();
+      const reader = new FileReader();
+
+      img.crossOrigin = 'anonymous'; // Enable CORS for the original image
+      watermarkImg.crossOrigin = 'anonymous'; // Enable CORS for the watermark image
+
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // Draw the original image
+        ctx.drawImage(img, 0, 0);
+
+        // Load watermark image (replace with your served/hosted image URL with CORS support)
+        watermarkImg.src = '/images/image-removebg-preview.png'; // Updated to match your file path
+
+        watermarkImg.onload = () => {
+          // Calculate watermark size (e.g., 10% of the original image width)
+          const watermarkSize = img.width * 0.2;
+          const watermarkX = img.width - watermarkSize - 20; // 20px padding from right
+          const watermarkY = img.height - watermarkSize - 20; // 20px padding from bottom
+
+          // Draw watermark with transparency
+          ctx.globalAlpha = 0.5; // 50% opacity
+          ctx.drawImage(watermarkImg, watermarkX, watermarkY, watermarkSize, watermarkSize);
+          ctx.globalAlpha = 1.0; // Reset opacity
+
+          // Convert canvas to Blob and then to File
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to create watermarked image'));
+              return;
+            }
+            const watermarkedFile = new File([blob], file.name, { type: file.type });
+            resolve(watermarkedFile);
+          }, file.type);
+        };
+
+        watermarkImg.onerror = () => {
+          if (isDev) console.warn('Watermark image failed to load, skipping watermark due to CORS or resource issue. ');
+          resolve(file); // Fallback to original file if watermark fails
+        };
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image for watermarking due to CORS or resource issue'));
+      reader.onerror = () => reject(new Error('Failed to read file for watermarking'));
+      reader.readAsDataURL(file);
+    });
+  };
+
   useEffect(() => {
-    fetchGalleryItems();
-  }, [currentPath]);
+    if (!projectId || !UUID_REGEX.test(projectId)) {
+      setError('Invalid or missing project ID in the URL');
+      setLoading(false);
+      return;
+    }
 
-  const fetchGalleryItems = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      let prefix = currentPath;
-      if (prefix && !prefix.endsWith('/')) {
-        prefix += '/';
+    let isMounted = true;
+
+    const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          if (isDev) console.log(`Fetching project, attempt ${i + 1}: ${url}`);
+          const response = await fetch(url, options);
+          if (response.status === 429 && i < retries - 1) {
+            if (isDev) console.warn(`Rate limit hit, retrying after ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          return response;
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          if (isDev) console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+        }
       }
-      if (prefix.startsWith('/')) {
-        prefix = prefix.slice(1);
-      }
+      throw new Error('Max retries reached');
+    };
 
-      console.log(`Fetching gallery items with prefix: '${prefix}'`);
+    const fetchProject = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      const response = await fetch(
-        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(
-          prefix
-        )}`,
-        {
+        const response = await fetchWithRetry(GET_PROJECT_BY_ID_URL, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
-        }
-      );
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch items: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (!data || !Array.isArray(data.files) || !Array.isArray(data.folders)) {
-        throw new Error('Unexpected API response format');
-      }
-
-      const mappedItems: GalleryItem[] = data.files.map((item: any) => {
-        const keyParts = item.key.split('/');
-        const title = keyParts.pop()?.replace(/\.[^/.]+$/, '') || 'Untitled';
-        let eventDate = item.last_modified.split('T')[0];
-
-        const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
-        if (dateMatch) {
-          eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+        if (!response.ok) {
+          if (response.status === 403) {
+            throw new Error('Unauthorized access to project details. Please check your credentials.');
+          } else if (response.status === 404) {
+            throw new Error(`Project with ID ${projectId} not found`);
+          } else if (response.status === 429) {
+            throw new Error('Too many requests. Please try again later.');
+          } else {
+            throw new Error(`Failed to fetch project: ${response.status} ${response.statusText}`);
+          }
         }
 
-        const isVideo = item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
+        const data = await response.json();
+        if (isDev) {
+          console.log('API Response:', data);
+          console.log('Project Object:', data.project);
+        }
 
-        return {
-          id: item.key,
-          shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
-          eventDate,
-          imageUrl: item.presigned_url || 'https://picsum.photos/400/300',
-          title,
-          uploadDate: item.last_modified.split('T')[0],
-          isWatermarked: false,
-          isPinProtected: false,
-          isFavorite: false,
-          key: item.key,
-          isVideo,
+        // Check if the response has the expected structure
+        if (!data || typeof data !== 'object' || !data.success || !data.project || !data.project.projectId) {
+          throw new Error('Invalid project data received');
+        }
+
+        const project = data.project;
+
+        // Validate required fields (only clientName and projectId required)
+        if (!project.clientName || !project.projectId) {
+          throw new Error('Project data is missing required fields (clientName or projectId)');
+        }
+
+        // API uses 'shootType' instead of 'eventType'
+        const eventType = project.shootType || 'Unknown';
+        const eventDate = project.eventDate || project.validUntil || new Date().toISOString().split('T')[0];
+
+        // Warn if optional fields are missing
+        if (!project.shootType || !project.eventDate) {
+          setError('Some project details are missing and have been set to default values.');
+        }
+
+        if (!isMounted) return;
+
+        setProjectData({
+          id: project.projectId,
+          title: `${project.clientName} - ${eventType}`,
+          clientName: project.clientName,
+          eventDate: eventDate,
+          eventType: eventType.split(',')[0].trim(),
+        });
+      } catch (err: any) {
+        if (isMounted) {
+          console.error('Error fetching project:', err.message);
+          setError(err.message || 'Failed to load project details. Please try again later.');
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    fetchProject();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
+
+  if (!projectId || !UUID_REGEX.test(projectId)) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <p className="text-red-500 text-lg">Invalid or missing project ID in the URL</p>
+          <button
+            onClick={() => navigate('/gallery')}
+            className="mt-4 px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
+          >
+            Back to Gallery
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="animate-spin h-12 w-12 text-[#00BCEB] mx-auto" />
+      </div>
+    );
+  }
+
+  if (error && !projectData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <p className="text-red-500 text-lg">{error || 'Project not found'}</p>
+          <button
+            onClick={() => navigate('/gallery')}
+            className="mt-4 px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
+          >
+            Back to Gallery
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    handleFiles(files);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    handleFiles(files);
+  };
+
+  const handleFiles = async (files: File[]) => {
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    const batchSize = 10;
+    for (let i = 0; i < imageFiles.length; i += batchSize) {
+      const batch = imageFiles.slice(i, i + batchSize);
+      const promises = batch.map(file => new Promise<UploadedFile>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          resolve({
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            file,
+            preview: e.target?.result as string,
+            title: file.name.replace(/\.[^/.]+$/, '')
+          });
         };
-      });
-
-      const mappedFolders: FolderItem[] = data.folders.map((folder: any) => ({
-        name: folder.name,
-        path: `/${folder.path.replace(/\/$/, '')}`,
+        reader.readAsDataURL(file);
       }));
-
-      setItems(mappedItems);
-      setFolders(mappedFolders);
-    } catch (err: any) {
-      console.error('Error fetching gallery items:', err);
-      setError(`Failed to load gallery items: ${err.message}`);
-      addNotification(`Failed to load gallery items: ${err.message}`, 'error');
-    } finally {
-      setLoading(false);
+      const newFiles = await Promise.all(promises);
+      setUploadedFiles(prev => [...prev, ...newFiles]);
     }
   };
 
-  // Apply filters and sorting to images
-  const filteredImages = items
-    .filter((item) => {
-      const eventDate = new Date(item.eventDate);
-      const itemMonth = eventDate.toLocaleString('default', { month: 'long' });
-
-      const matchesMonth = !filters.month || itemMonth === filters.month;
-      const matchesShootType = !filters.shootType || item.shootType === filters.shootType;
-      const matchesSearch = !filters.search || item.title.toLowerCase().includes(filters.search.toLowerCase());
-      const matchesFavorites = !filters.favorites || item.isFavorite;
-      const matchesWatermarked = !filters.watermarked || item.isWatermarked;
-      const matchesPinProtected = !filters.pinProtected || item.isPinProtected;
-
-      return matchesMonth && matchesShootType && matchesSearch && matchesFavorites && matchesWatermarked && matchesPinProtected;
-    })
-    .sort((a, b) => {
-      let aValue: any, bValue: any;
-
-      switch (sortBy) {
-        case 'title':
-          aValue = a.title.toLowerCase();
-          bValue = b.title.toLowerCase();
-          break;
-        case 'eventDate':
-          aValue = new Date(a.eventDate);
-          bValue = new Date(b.eventDate);
-          break;
-        case 'shootType':
-          aValue = a.shootType;
-          bValue = b.shootType;
-          break;
-        default:
-          aValue = new Date(a.uploadDate);
-          bValue = new Date(b.uploadDate);
-      }
-
-      if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
-      }
-    });
-
-  // Generate breadcrumbs
-  const getBreadcrumbs = () => {
-    const parts = currentPath.split('/').filter(Boolean);
-    const breadcrumbs = [{ name: 'Gallery', path: '' }];
-
-    let currentBreadcrumbPath = '';
-    parts.forEach((part) => {
-      currentBreadcrumbPath += `/${part}`;
-      breadcrumbs.push({ name: part, path: currentBreadcrumbPath });
-    });
-
-    return breadcrumbs;
+  const removeFile = (fileId: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
-  // Event handlers
-  const handleFilterChange = (filterType: string, value: string | boolean) => {
-    setFilters((prev) => ({ ...prev, [filterType]: value }));
-  };
-
-  const handleFolderClick = (path: string) => {
-    navigate(`/gallery${path}`);
-  };
-
-  const handleBack = () => {
-    const pathParts = currentPath.split('/').filter(Boolean);
-    pathParts.pop();
-    const parentPath = pathParts.length > 0 ? `/${pathParts.join('/')}` : '';
-    navigate(`/gallery${parentPath}`);
-  };
-
-  const handleImageClick = (item: GalleryItem) => {
-    setPreviewModal({ isOpen: true, currentImage: item });
-  };
-
-  const handleSelectItem = (itemId: string, checked: boolean) => {
-    if (checked) {
-      setSelectedItems((prev) => [...prev, itemId]);
-    } else {
-      setSelectedItems((prev) => prev.filter((id) => id !== itemId));
-    }
-  };
-
-  const handleSelectAll = () => {
-    const allIds = filteredImages.map((item) => item.id);
-    setSelectedItems(allIds);
-  };
-
-  const handleClearSelection = () => {
-    setSelectedItems([]);
-  };
-
-  const handleDownload = (items: GalleryItem[]) => {
-    items.forEach((item) => {
-      const link = document.createElement('a');
-      link.href = item.imageUrl;
-      link.download = `${item.title}${item.isVideo ? '.mp4' : '.jpg'}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    });
-  };
-
-  const handleBulkDownload = () => {
-    const itemsToDownload = filteredImages.filter((item) => selectedItems.includes(item.id));
-    handleDownload(itemsToDownload);
-  };
-
-  const handleShare = () => {
-    setShareModal(true);
-  };
-
-  const handleToggleFavorite = (item: GalleryItem) => {
-    setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !i.isFavorite } : i))
+  const updateFileTitle = (fileId: string, title: string) => {
+    setUploadedFiles(prev => 
+      prev.map(f => f.id === fileId ? { ...f, title } : f)
     );
   };
 
-  const handleBulkDelete = () => {
-    handleDeleteImages(selectedItems);
+  const handleSettingChange = (setting: string, value: any) => {
+    setSettings(prev => ({
+      ...prev,
+      [setting]: value
+    }));
   };
 
-  const handleDeleteImages = async (itemIds: string[]) => {
-    if (itemIds.length === 0) {
-      setError('No items selected for deletion');
-      addNotification('No items selected for deletion', 'error');
+  const handleUpload = async () => {
+    if (uploadedFiles.length === 0) {
+      setUploadMessages(['❌ No files selected for upload']);
       return;
     }
 
-    const itemsToDelete = items.filter((item) => itemIds.includes(item.id));
-    const confirmMessage =
-      itemIds.length === 1
-        ? `Are you sure you want to delete "${itemsToDelete[0]?.title}"?`
-        : `Are you sure you want to delete ${itemIds.length} item(s)?`;
-
-    if (!window.confirm(confirmMessage)) return;
-
-    try {
-      setDeleteLoading(itemIds);
-      setError(null);
-      setDeleteErrors([]);
-
-      const keys = itemsToDelete
-        .map((item) => item.key)
-        .filter((key): key is string => typeof key === 'string' && key.trim() !== '');
-
-      if (keys.length === 0) {
-        throw new Error('No valid keys found for deletion');
-      }
-
-      const response = await fetch(
-        'https://9qvci31498.execute-api.eu-north-1.amazonaws.com/default/deleteimage',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keys }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Delete request failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.message || 'Delete operation failed');
-      }
-
-      const deletedKeys = result.deleted || [];
-      const errors: DeleteError[] = result.errors || [];
-      const deletedItems = itemsToDelete.filter((item) => deletedKeys.includes(item.key));
-
-      setItems((prev) => prev.filter((item) => !deletedItems.some((d) => d.id === item.id)));
-      setSelectedItems((prev) => prev.filter((id) => !deletedItems.some((d) => d.id === id)));
-
-      if (errors.length > 0) {
-        setDeleteErrors(errors);
-        setError(`Partially completed: ${deletedKeys.length} deleted, ${errors.length} failed.`);
-        addNotification(`Partially completed: ${deletedKeys.length} deleted, ${errors.length} failed.`, 'error');
-      } else {
-        addNotification(`Successfully deleted ${deletedKeys.length} item(s)`, 'success');
-      }
-    } catch (err: any) {
-      console.error('Error deleting items:', err);
-      setError(`Failed to delete items: ${err.message}`);
-      addNotification(`Failed to delete items: ${err.message}`, 'error');
-    } finally {
-      setDeleteLoading([]);
-    }
-  };
-
-  const handleDelete = (itemId: string) => {
-    handleDeleteImages([itemId]);
-  };
-
-  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    if (!e.currentTarget.src.includes('picsum.photos')) {
-      console.error(`Media failed to load: ${e.currentTarget.src}`);
-      e.currentTarget.src = 'https://picsum.photos/400/300';
-    }
-  };
-
-  // Create folder handler
-  const handleCreateFolder = async () => {
-    if (!newFolderName.trim()) {
-      setError('Folder name is required');
-      addNotification('Folder name is required', 'error');
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    const oversizedFiles = uploadedFiles.filter(file => file.file.size > maxSize);
+    if (oversizedFiles.length > 0) {
+      setUploadMessages(prev => [
+        ...prev,
+        `❌ ${oversizedFiles.map(f => f.file.name).join(', ')} exceed 50MB limit`
+      ]);
       return;
     }
 
-    try {
-      let prefix = currentPath;
-      if (prefix && !prefix.endsWith('/')) prefix += '/';
-      if (prefix.startsWith('/')) prefix = prefix.slice(1);
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadMessages([]);
 
-      const folderKey = `${prefix}${newFolderName}/`;
-
-      console.log(`Creating folder with key: ${folderKey}`);
-
-      const response = await fetch('https://n7l9v29nb4.execute-api.eu-north-1.amazonaws.com/default/createfolder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: folderKey }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create folder: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.message || 'Folder creation failed');
-      }
-
-      setCreateFolderModal(false);
-      setNewFolderName('');
-      fetchGalleryItems();
-      addNotification(`Folder created: ${newFolderName}`, 'success');
-    } catch (err: any) {
-      console.error('Error creating folder:', err);
-      setError(`Failed to create folder: ${err.message}`);
-      addNotification(`Failed to create folder: ${err.message}`, 'error');
-    }
-  };
-
-  // Upload handlers
-  const handleFileSelect = (selectedFiles: FileList | null) => {
-    if (!selectedFiles) return;
-
-    const newFiles: UploadFile[] = Array.from(selectedFiles)
-      .filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
-      .map((file) => ({
-        file,
-        id: Math.random().toString(36).substr(2, 9),
-        progress: 0,
-        status: 'pending' as const,
-      }));
-
-    if (newFiles.length === 0) {
-      setError('No valid image or video files selected');
-      addNotification('No valid image or video files selected', 'error');
-      return;
-    }
-
-    setUploadFiles(newFiles);
-    startUpload(newFiles);
-  };
-
-  const startUpload = async (filesToUpload: UploadFile[]) => {
-    if (filesToUpload.length === 0) return;
-
-    try {
-      // Format prefix from currentPath
-      let prefix = currentPath;
-      if (prefix.startsWith('/')) prefix = prefix.slice(1);
-      if (prefix && !prefix.endsWith('/')) prefix += '/';
-      if (prefix === '/') prefix = '';
-
-      const displayPath = prefix || 'root';
-      console.log(`Uploading to path: ${displayPath}`);
-
-      addNotification(
-        `Starting upload of ${filesToUpload.length} file(s) to ${displayPath}`,
-        'info'
-      );
-
-      // Call Lambda to get presigned URLs
-      const response = await fetch('https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: filesToUpload.map((f) => f.file.name),
-          folder: prefix,
-        }),
-      });
-
-      console.log('Lambda request body:', JSON.stringify({
-        files: filesToUpload.map((f) => f.file.name),
-        folder: prefix,
-      }));
-
-      if (!response.ok) {
-        throw new Error(`Failed to get presigned URLs: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log('Lambda response:', JSON.stringify(data, null, 2));
-
-      if (!data.success || !data.uploads || !Array.isArray(data.uploads)) {
-        throw new Error(data.message || 'Invalid Lambda response format');
-      }
-
-      // Filter valid uploads
-      const presignedUrls = data.uploads.filter((upload: any) => {
-        if (!upload.url || !upload.key) {
-          console.warn('Skipping invalid upload entry:', JSON.stringify(upload, null, 2));
-          addNotification(`Skipping invalid upload entry for file: ${upload.key || 'unknown'}`, 'error');
-          return false;
-        }
-        if (Object.keys(upload).length > 2) {
-          console.warn('Unexpected fields in upload entry:', Object.keys(upload));
-        }
-        return true;
-      });
-
-      // Verify expected keys
-      const expectedKeys = filesToUpload.map((f) => `${prefix}${f.file.name}`);
-      const receivedKeys = presignedUrls.map((u: any) => u.key);
-      console.log('Expected S3 keys:', expectedKeys);
-      console.log('Received S3 keys:', receivedKeys);
-
-      if (presignedUrls.length !== filesToUpload.length) {
-        console.warn(`Expected ${filesToUpload.length} presigned URLs, got ${presignedUrls.length}`);
-        addNotification(`Warning: Received ${presignedUrls.length} valid URLs out of ${filesToUpload.length} requested`, 'info');
-      }
-
-      if (presignedUrls.length === 0) {
-        throw new Error('No valid presigned URLs received');
-      }
-
-      // Upload each file using presigned URLs
-      const failedUploads: string[] = [];
-      for (let i = 0; i < Math.min(filesToUpload.length, presignedUrls.length); i++) {
-        const file = filesToUpload[i];
-        const { url, key } = presignedUrls[i];
-
-        console.log(`Uploading file: ${file.file.name} to S3 key: ${key}`);
-        console.log(`Presigned URL: ${url}`);
-
-        setUploadFiles((prev) =>
-          prev.map((f) => (f.id === file.id ? { ...f, status: 'uploading', progress: 0 } : f))
-        );
-
+    const uploadWithRetry = async (url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
+      for (let i = 0; i < retries; i++) {
         try {
-          const uploadResponse = await fetch(url, {
+          if (isDev) console.log(`PUT request attempt ${i + 1} for ${url}`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30-second timeout
+          const response = await fetch(url, { ...options, signal: controller.signal });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (err: any) {
+          if (err.name === 'AbortError') {
+            throw new Error('Upload timed out after 30 seconds');
+          }
+          if (i === retries - 1) throw err;
+          if (isDev) console.warn(`PUT attempt ${i + 1} failed, retrying after ${delay}ms: ${err.message}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      throw new Error('Max retries reached for PUT request');
+    };
+
+    try {
+      // Apply watermark to images if enabled
+      let filesToUpload = uploadedFiles;
+      if (settings.applyWatermark) {
+        setUploadMessages(prev => [...prev, '📝 Applying watermarks to images...']);
+        const watermarkedPromises = uploadedFiles.map(async (fileObj) => {
+          try {
+            const watermarkedFile = await addWatermark(fileObj.file);
+            return { ...fileObj, watermarkedFile };
+          } catch (err) {
+            if (isDev) console.error('Watermarking failed due to CORS or resource issue:', err.message);
+            setUploadMessages(prev => [...prev, `⚠️ Failed to apply watermark to ${fileObj.file.name}, uploading original`]);
+            return { ...fileObj }; // Fallback to original file
+          }
+        });
+        filesToUpload = await Promise.all(watermarkedPromises);
+        setUploadedFiles(filesToUpload); // Update state with watermarked files
+      }
+
+      const fileNames = filesToUpload.map(file => file.watermarkedFile?.name || file.file.name);
+      const fileTypes = filesToUpload.map(file => file.watermarkedFile?.type || file.file.type);
+      // Create folder path: projects/gallery/clientName-eventType-eventDate
+      const folder = `projects/gallery/${sanitizeFolderName(projectData!.clientName)}-${sanitizeFolderName(projectData!.eventType || 'Unknown')}-${sanitizeFolderName(projectData!.eventDate || new Date().toISOString().split('T')[0])}`;
+
+      const payload = {
+        project_id: projectData!.id,
+        client_name: projectData!.clientName,
+        event_type: projectData!.eventType || 'Unknown',
+        event_date: projectData!.eventDate || new Date().toISOString().split('T')[0],
+        uploadConfig: {
+          projectId: projectData!.id,
+          files: fileNames,
+          fileTypes: fileTypes,
+          folder,
+          settings: {
+            enableFaceTagging: settings.enableFaceTagging,
+            applyWatermark: settings.applyWatermark,
+            protectWithPin: settings.protectWithPin,
+            pin: settings.protectWithPin ? settings.pin : undefined
+          }
+        }
+      };
+
+      if (isDev) console.log('Upload Payload:', JSON.stringify(payload, null, 2));
+
+      const response = await fetch(UPLOAD_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        if (response.status === 400) {
+          throw new Error('Missing required fields in upload request');
+        } else if (response.status === 403) {
+          throw new Error('Unauthorized access to upload endpoint. Check S3 bucket permissions or API credentials.');
+        } else if (response.status === 429) {
+          throw new Error('Too many requests. Please try again later.');
+        } else {
+          throw new Error(`Upload API error: ${response.status} ${response.statusText}`);
+        }
+      }
+
+      const result = await response.json();
+      if (isDev) console.log('Upload Response:', JSON.stringify(result, null, 2));
+
+      const presignedUrls = result.presignedUrls;
+      if (!Array.isArray(presignedUrls) || presignedUrls.length !== filesToUpload.length) {
+        if (isDev) console.error('Upload API Response (Invalid presignedUrls):', JSON.stringify(result, null, 2));
+        throw new Error(`Invalid or missing presigned URLs in response. Expected ${filesToUpload.length} URLs, got ${presignedUrls ? presignedUrls.length : 0}.`);
+      }
+
+      let completed = 0;
+      const uploadPromises = filesToUpload.map(async (fileObj, i) => {
+        const presignedUrl = presignedUrls[i];
+        const fileToUpload = fileObj.watermarkedFile || fileObj.file;
+        try {
+          const res = await uploadWithRetry(presignedUrl, {
             method: 'PUT',
-            body: file.file,
-            headers: { 'Content-Type': file.file.type },
+            body: fileToUpload,
+            headers: {
+              'Content-Type': fileToUpload.type
+            }
           });
 
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            let errorMessage = `Failed to upload ${file.file.name}: ${uploadResponse.status} ${uploadResponse.statusText}`;
-            if (uploadResponse.status === 403) {
-              errorMessage += ' - Check S3 permissions or Content-Type mismatch';
-            }
-            throw new Error(`${errorMessage} - ${errorText}`);
+          if (!res.ok) {
+            throw new Error(`Failed to upload: ${fileToUpload.name} (${res.status} ${res.statusText})`);
           }
 
-          setUploadFiles((prev) =>
-            prev.map((f) => (f.id === file.id ? { ...f, status: 'completed', progress: 100 } : f))
-          );
+          completed++;
+          setUploadProgress(Math.round((completed / filesToUpload.length) * 100));
+          setUploadMessages(prev => [...prev, `✅ ${fileToUpload.name} uploaded`]);
         } catch (err: any) {
-          console.error(`Upload failed for ${file.file.name}:`, err);
-          failedUploads.push(file.file.name);
-          setUploadFiles((prev) =>
-            prev.map((f) => (f.id === file.id ? { ...f, status: 'error', error: err.message } : f))
-          );
+          if (isDev) console.error(`Failed PUT to ${presignedUrl}: ${err.message}`);
+          setUploadMessages(prev => [...prev, `❌ ${fileToUpload.name} failed: ${err.message}`]);
+          throw err;
         }
-      }
+      });
 
-      if (failedUploads.length > 0) {
-        throw new Error(`Failed to upload ${failedUploads.length} file(s): ${failedUploads.join(', ')}`);
-      }
+      await Promise.all(uploadPromises);
 
-      fetchGalleryItems();
-      setUploadFiles([]);
-      addNotification(`Successfully uploaded ${presignedUrls.length} file(s) to ${displayPath}`, 'success');
-    } catch (error: any) {
-      console.error('Upload error:', error);
-      setUploadFiles((prev) =>
-        prev.map((f) =>
-          filesToUpload.some((pf) => pf.id === f.id)
-            ? { ...f, status: 'error', error: error.message }
-            : f
-        )
-      );
-      setError(`Upload failed: ${error.message}`);
-      addNotification(`Upload failed: ${error.message}`, 'error');
+      setUploadMessages(prev => [...prev, '✅ Upload completed successfully']);
+      setTimeout(() => navigate('/gallery'), 2000);
+    } catch (err: any) {
+      console.error('Upload error details:', err);
+      setUploadMessages(prev => [...prev, `❌ Error: ${err.message}`]);
+    } finally {
+      setIsUploading(false);
     }
+  };
+
+  const handleCancel = () => {
+    if (uploadedFiles.length > 0) {
+      const confirm = window.confirm('You have unsaved files. Are you sure you want to cancel?');
+      if (!confirm) return;
+    }
+    navigate('/gallery');
+  };
+
+  const isFormValid = () => {
+    if (uploadedFiles.length === 0) return false;
+    if (settings.protectWithPin && settings.pin.length !== 4) return false;
+    return true;
   };
 
   return (
-    <GalleryErrorBoundary>
-      <div className="min-h-screen bg-gray-50 flex">
-        <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-
-        <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-          <Header title="Gallery Management" sidebarCollapsed={sidebarCollapsed} />
-
-          <main className="pt-16 p-6">
-            {/* Notifications */}
-            {notifications.length > 0 && (
-              <div className="fixed top-20 right-6 z-50 space-y-2">
-                {notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className={`p-4 rounded-lg shadow-lg text-white ${
-                      notification.type === 'success'
-                        ? 'bg-green-500'
-                        : notification.type === 'error'
-                        ? 'bg-red-500'
-                        : 'bg-blue-500'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span>{notification.message}</span>
-                      <button
-                        onClick={() =>
-                          setNotifications((prev) => prev.filter((n) => n.id !== notification.id))
-                        }
-                        className="ml-4"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+    <div className="min-h-screen bg-gray-50 flex">
+      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+        <Header title="Upload Gallery" sidebarCollapsed={sidebarCollapsed} />
+        <main className="pt-16 p-6">
+          <button
+            onClick={() => navigate('/gallery')}
+            className="flex items-center text-[#00BCEB] hover:text-[#00A5CF] mb-6 transition-colors duration-200"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Gallery
+          </button>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h1 className="text-2xl font-bold text-[#2D2D2D] mb-2">
+              Upload Gallery – {projectData?.title}
+            </h1>
+            {error && (
+              <p className="text-yellow-600 text-sm mb-2 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {error}
+              </p>
             )}
-
-            {/* Header Section */}
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <div className="flex items-center mb-2">
-                  {currentPath && (
-                    <button
-                      onClick={handleBack}
-                      className="flex items-center text-[#00BCEB] hover:text-[#00A5CF] mr-4 transition-colors duration-200"
-                    >
-                      <ArrowLeft className="h-5 w-5 mr-2" />
-                      Back
-                    </button>
-                  )}
-                  <h2 className="text-2xl font-bold text-[#2D2D2D]">Gallery Management</h2>
-                </div>
-
-                {/* Breadcrumbs */}
-                <nav className="flex items-center space-x-2 text-sm text-gray-600">
-                  {getBreadcrumbs().map((crumb, index) => (
-                    <React.Fragment key={crumb.path}>
-                      {index > 0 && <ChevronRight className="w-4 h-4" />}
-                      <button
-                        onClick={() => navigate(`/gallery${crumb.path}`)}
-                        className={`hover:text-[#00BCEB] transition-colors duration-200 ${
-                          index === getBreadcrumbs().length - 1 ? 'font-medium text-[#2D2D2D]' : ''
-                        }`}
-                      >
-                        {index === 0 ? <Home className="w-4 h-4" /> : crumb.name}
-                      </button>
-                    </React.Fragment>
-                  ))}
-                </nav>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <button
-                  onClick={() => setCreateFolderModal(true)}
-                  className="flex items-center px-4 py-2 bg-[#00BCEB] text-white rounded-lg font-medium hover:bg-[#00A5CF] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                >
-                  <FolderPlus className="h-4 w-4 mr-2" />
-                  Create Folder
-                </button>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Upload New
-                </button>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,video/*"
-                  ref={fileInputRef}
-                  onChange={(e) => handleFileSelect(e.target.files)}
-                  hidden
-                />
-              </div>
+            <div className="flex items-center space-x-4 text-gray-600">
+              <span>{projectData?.eventDate ? new Date(projectData.eventDate).toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              }) : 'Date Unknown'}</span>
+              <span>•</span>
+              <span>{projectData?.clientName}</span>
+              <span>•</span>
+              <span>{projectData?.eventType || 'Unknown'}</span>
             </div>
-
-            {/* Toolbar */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  {/* Search */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search media..."
-                      value={filters.search}
-                      onChange={(e) => handleFilterChange('search', e.target.value)}
-                      className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent w-64"
-                    />
-                  </div>
-
-                  {/* Filters Toggle */}
-                  <button
-                    onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center px-3 py-2 border rounded-lg transition-colors duration-200 ${
-                      showFilters
-                        ? 'border-[#00BCEB] text-[#00BCEB] bg-[#00BCEB]/5'
-                        : 'border-gray-200 text-gray-600 hover:border-[#00BCEB] hover:text-[#00BCEB]'
-                    }`}
-                  >
-                    <Filter className="w-4 h-4 mr-2" />
-                    Filters
-                  </button>
-
-                  {/* Sort */}
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent"
-                  >
-                    <option value="uploadDate">Upload Date</option>
-                    <option value="eventDate">Event Date</option>
-                    <option value="title">Name</option>
-                    <option value="shootType">Shoot Type</option>
-                  </select>
-
-                  <button
-                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                    className="p-2 border border-gray-200 rounded-lg hover:border-[#00BCEB] hover:text-[#00BCEB] transition-colors duration-200"
-                  >
-                    {sortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
-                  </button>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Upload Files</h3>
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all duration-200 ${
+                    isDragging ? 'border-[#00BCEB] bg-[#00BCEB]/5' : 'border-gray-300 hover:border-[#00BCEB] hover:bg-[#00BCEB]/5'
+                  }`}
+                >
+                  <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-lg font-medium text-[#2D2D2D] mb-2">
+                    Drop files here or click to browse
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Supports JPG, PNG, HEIC files up to 50MB each
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
                 </div>
-
-                <div className="flex items-center space-x-3">
-                  {/* Selection Info */}
-                  {selectedItems.length > 0 && (
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-600">{selectedItems.length} selected</span>
-                      <button
-                        onClick={handleBulkDownload}
-                        className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 text-sm"
-                      >
-                        <Download className="w-4 h-4 inline mr-1" />
-                        Download
-                      </button>
-                      <button
-                        onClick={handleShare}
-                        className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg hover:bg-[#e55a00] transition-colors duration-200 text-sm"
-                      >
-                        <Share2 className="w-4 h-4 inline mr-1" />
-                        Share
-                      </button>
-                      <button
-                        onClick={handleBulkDelete}
-                        className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200 text-sm"
-                      >
-                        <Trash2 className="w-4 h-4 inline mr-1" />
-                        Delete
-                      </button>
-                      <button
-                        onClick={handleClearSelection}
-                        className="p-1.5 text-gray-500 hover:text-gray-700"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                {isUploading && (
+                  <div className="mt-4">
+                    <div className="text-right text-sm text-gray-500">
+                      Uploading {uploadProgress}% of {uploadedFiles.length} file(s)
                     </div>
-                  )}
-
-                  {/* View Mode */}
-                  <div className="flex border border-gray-200 rounded-lg">
-                    <button
-                      onClick={() => setViewMode('grid')}
-                      className={`p-2 ${viewMode === 'grid' ? 'bg-[#00BCEB] text-white' : 'text-gray-600 hover:text-[#00BCEB]'} rounded-l-lg transition-colors duration-200`}
-                    >
-                      <Grid3X3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setViewMode('list')}
-                      className={`p-2 ${viewMode === 'list' ? 'bg-[#00BCEB] text-white' : 'text-gray-600 hover:text-[#00BCEB]'} rounded-r-lg transition-colors duration-200`}
-                    >
-                      <List className="w-4 h-4" />
-                    </button>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-[#00BCEB] h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      ></div>
+                    </div>
                   </div>
-                </div>
+                )}
+                {uploadMessages.length > 0 && (
+                  <div className="mt-4 space-y-1 text-sm">
+                    {uploadMessages.map((msg, index) => (
+                      <p key={index} className={msg.startsWith("✅") ? "text-green-600" : "text-red-600"}>
+                        {msg}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
-
-              {/* Filters */}
-              {showFilters && (
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
-                    <select
-                      value={filters.month}
-                      onChange={(e) => handleFilterChange('month', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent"
-                    >
-                      <option value="">All Months</option>
-                      {months.map((month) => (
-                        <option key={month} value={month}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Shoot Type</label>
-                    <select
-                      value={filters.shootType}
-                      onChange={(e) => handleFilterChange('shootType', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent"
-                    >
-                      <option value="">All Types</option>
-                      {shootTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.favorites}
-                        onChange={(e) => handleFilterChange('favorites', e.target.checked)}
-                        className="h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Favorites</span>
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.watermarked}
-                        onChange={(e) => handleFilterChange('watermarked', e.target.checked)}
-                        className="h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Watermarked</span>
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.pinProtected}
-                        onChange={(e) => handleFilterChange('pinProtected', e.target.checked)}
-                        className="h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Pin Protected</span>
-                    </label>
+              {uploadedFiles.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">
+                    Uploaded Files ({uploadedFiles.length})
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {uploadedFiles.map((file) => (
+                      <div key={file.id} className="relative group">
+                        <div className="aspect-square rounded-lg overflow-hidden bg-gray-100">
+                          <img
+                            src={file.preview}
+                            alt={file.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <button
+                          onClick={() => removeFile(file.id)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-red-600"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                        <input
+                          type="text"
+                          value={file.title}
+                          onChange={(e) => updateFileTitle(file.id, e.target.value)}
+                          className="mt-2 w-full px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-[#00BCEB] focus:border-[#00BCEB]"
+                          placeholder="Image title"
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center">
-                <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
-                <span className="text-red-700">{error}</span>
-              </div>
-            )}
-
-            {/* Delete Errors */}
-            {deleteErrors.length > 0 && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <h3 className="text-sm font-medium text-red-700 mb-2">Deletion Errors:</h3>
-                <ul className="list-disc list-inside text-red-600 text-sm">
-                  {deleteErrors.map((err, index) => (
-                    <li key={index}>
-                      {err.Key}: {err.Message} {err.Code && `(${err.Code})`}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Upload Progress */}
-            {uploadFiles.length > 0 && (
-              <div className="mb-6 p-4 bg-white rounded-lg shadow-sm border border-gray-100">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Uploading Files</h3>
-                <div className="space-y-2">
-                  {uploadFiles.map((file) => (
-                    <div key={file.id} className="flex items-center space-x-2">
-                      <div className="flex-1">
-                        <p className="text-sm text-gray-600">{file.file.name}</p>
-                        <div className="w-full bg-gray-200 rounded-full h-2.5">
-                          <div
-                            className={`h-2.5 rounded-full ${
-                              file.status === 'error'
-                                ? 'bg-red-500'
-                                : file.status === 'completed'
-                                ? 'bg-green-500'
-                                : 'bg-[#00BCEB]'
-                            }`}
-                            style={{ width: `${file.progress}%` }}
-                          ></div>
-                        </div>
-                        {file.status === 'error' && (
-                          <p className="text-xs text-red-500 mt-1">{file.error}</p>
-                        )}
-                      </div>
-                      {file.status === 'uploading' && (
-                        <Loader2 className="w-4 h-4 text-[#00BCEB] animate-spin" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Content */}
-            {loading ? (
-              <div className="flex justify-center items-center h-64">
-                <Loader2 className="h-8 w-8 text-[#00BCEB] animate-spin" />
-              </div>
-            ) : (
-              <>
-                {folders.length === 0 && filteredImages.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Image className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No media or folders found in this directory.</p>
-                  </div>
-                ) : (
-                  <div
-                    className={`${
-                      viewMode === 'grid'
-                        ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
-                        : 'space-y-4'
-                    }`}
-                  >
-                    {/* Folders */}
-                    {folders.map((folder) => (
-                      <div
-                        key={folder.path}
-                        onClick={() => handleFolderClick(folder.path)}
-                        className="group cursor-pointer p-4 bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
-                      >
-                        <div className="flex items-center space-x-3">
-                          <Folder className="h-8 w-8 text-[#00BCEB]" />
-                          <div>
-                            <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
-                              {folder.name}
-                            </p>
-                            <p className="text-sm text-gray-500">Folder</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Images/Videos */}
-                    {filteredImages.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`group relative ${
-                          viewMode === 'grid'
-                            ? 'bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200'
-                            : 'flex items-center space-x-4 p-4 bg-white rounded-lg shadow-sm border border-gray-100'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedItems.includes(item.id)}
-                          onChange={(e) => handleSelectItem(item.id, e.target.checked)}
-                          className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                        />
-                        <div
-                          onClick={() => handleImageClick(item)}
-                          className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
-                        >
-                          {item.isVideo ? (
-                            <div className="relative">
-                              <video
-                                src={item.imageUrl}
-                                className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                                onError={handleImageError}
-                              />
-                              <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-white opacity-75" />
-                            </div>
-                          ) : (
-                            <img
-                              src={item.imageUrl}
-                              alt={item.title}
-                              className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                              onError={handleImageError}
-                            />
-                          )}
-                        </div>
-                        <div
-                          className={
-                            viewMode === 'grid'
-                              ? 'p-4'
-                              : 'flex-1 flex items-center justify-between'
-                          }
-                        >
-                          <div>
-                            <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
-                              {item.title}
-                            </p>
-                            <p className="text-sm text-gray-500">{item.shootType}</p>
-                            <p className="text-sm text-gray-500">{item.eventDate}</p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleToggleFavorite(item)}
-                              className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
-                            >
-                              <Star className="w-4 h-4" fill={item.isFavorite ? 'currentColor' : 'none'} />
-                            </button>
-                            <button
-                              onClick={() => handleImageClick(item)}
-                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDownload([item])}
-                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            {deleteLoading.includes(item.id) ? (
-                              <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
-                            ) : (
-                              <button
-                                onClick={() => handleDelete(item.id)}
-                                className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </main>
-
-          {/* Preview Modal */}
-          {previewModal.isOpen && previewModal.currentImage && (
-            <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-              <div className="relative max-w-4xl w-full">
-                <button
-                  onClick={() => setPreviewModal({ isOpen: false, currentImage: null })}
-                  className="absolute top-4 right-4 text-white hover:text-gray-300"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-                {previewModal.currentImage.isVideo ? (
-                  <video
-                    src={previewModal.currentImage.imageUrl}
-                    controls
-                    className="w-full max-h-[80vh] object-contain rounded-lg"
-                    onError={handleImageError}
-                  />
-                ) : (
-                  <img
-                    src={previewModal.currentImage.imageUrl}
-                    alt={previewModal.currentImage.title}
-                    className="w-full max-h-[80vh] object-contain rounded-lg"
-                    onError={handleImageError}
-                  />
-                )}
-                <div className="bg-white p-4 rounded-b-lg">
-                  <p className="font-medium text-[#2D2D2D]">{previewModal.currentImage.title}</p>
-                  <p className="text-sm text-gray-500">{previewModal.currentImage.shootType}</p>
-                  <p className="text-sm text-gray-500">{previewModal.currentImage.eventDate}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Share Modal */}
-          {shareModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 w-full max-w-md">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-[#2D2D2D]">Share Media</h3>
-                  <button
-                    onClick={() => setShareModal(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Smart Features</h3>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Shareable Link</label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="text"
-                        value="https://example.com/share/123"
-                        readOnly
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-                      />
-                      <button className="p-2 text-[#00BCEB] hover:text-[#00A5CF]">
-                        <Copy className="w-4 h-4" />
-                      </button>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-[#2D2D2D]">Enable Face Tagging</p>
+                      <p className="text-sm text-gray-600">Automatically detect and tag faces</p>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="email"
-                        placeholder="Enter email address"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                      />
-                      <button className="p-2 text-[#00BCEB] hover:text-[#00A5CF]">
-                        <Mail className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex justify-end space-x-2">
                     <button
-                      onClick={() => setShareModal(false)}
-                      className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                      onClick={() => handleSettingChange('enableFaceTagging', !settings.enableFaceTagging)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                        settings.enableFaceTagging ? 'bg-[#00BCEB]' : 'bg-gray-300'
+                      }`}
                     >
-                      Cancel
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          settings.enableFaceTagging ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
                     </button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-[#2D2D2D]">Apply Watermark</p>
+                      <p className="text-sm text-gray-600">Add studio watermark to images</p>
+                    </div>
                     <button
-                      onClick={() => {
-                        // Implement share logic
-                        setShareModal(false);
-                        addNotification('Link shared successfully', 'success');
-                      }}
-                      className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
+                      onClick={() => handleSettingChange('applyWatermark', !settings.applyWatermark)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                        settings.applyWatermark ? 'bg-[#00BCEB]' : 'bg-gray-300'
+                      }`}
                     >
-                      Share
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          settings.applyWatermark ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-[#2D2D2D]">Protect Gallery with PIN</p>
+                      <p className="text-sm text-gray-600">Secure client access with PIN</p>
+                    </div>
+                    <button
+                      onClick={() => handleSettingChange('protectWithPin', !settings.protectWithPin)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                        settings.protectWithPin ? 'bg-[#00BCEB]' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          settings.protectWithPin ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Create Folder Modal */}
-          {createFolderModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 w-full max-w-md">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-[#2D2D2D]">Create New Folder</h3>
-                  <button
-                    onClick={() => setCreateFolderModal(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+              {settings.protectWithPin && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">PIN Protection</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-[#2D2D2D] mb-2">
+                      Enter 4-digit PIN for client access
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Lock className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <input
+                        type={showPin ? 'text' : 'password'}
+                        value={settings.pin}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          handleSettingChange('pin', value);
+                        }}
+                        className="w-full pl-10 pr-12 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"
+                        placeholder="0000"
+                        maxLength={4}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPin(!showPin)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                      >
+                        {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {settings.pin.length > 0 && settings.pin.length < 4 && (
+                      <p className="mt-1 text-sm text-red-500 flex items-center">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        PIN must be 4 digits
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
-                  <input
-                    type="text"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    placeholder="Enter folder name"
-                  />
-                </div>
-                <div className="flex justify-end space-x-2">
-                  <button
-                    onClick={() => setCreateFolderModal(false)}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCreateFolder}
-                    className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
-                  >
-                    Create
-                  </button>
+              )}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Upload Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Files to upload:</span>
+                    <span className="font-medium text-[#2D2D2D]">{uploadedFiles.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Face tagging:</span>
+                    <span className={`font-medium ${settings.enableFaceTagging ? 'text-green-600' : 'text-gray-400'}`}>
+                      {settings.enableFaceTagging ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Watermark:</span>
+                    <span className={`font-medium ${settings.applyWatermark ? 'text-green-600' : 'text-gray-400'}`}>
+                      {settings.applyWatermark ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">PIN protection:</span>
+                    <span className={`font-medium ${settings.protectWithPin ? 'text-green-600' : 'text-gray-400'}`}>
+                      {settings.protectWithPin ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
                 </div>
               </div>
+              <div className="space-y-3">
+                <button
+                  onClick={handleUpload}
+                  disabled={!isFormValid() || isUploading}
+                  className={`w-full flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-all duration-200 ${
+                    isFormValid() && !isUploading
+                      ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Gallery
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isUploading}
+                  className="w-full px-6 py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        </main>
       </div>
-    </GalleryErrorBoundary>
+    </div>
   );
 }
 
-export default Gallery;
+export default GalleryUpload;
