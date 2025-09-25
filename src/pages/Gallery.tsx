@@ -1,7 +1,14 @@
+/* Full modified Gallery.tsx — every single line included.
+   Changes: simplified share flow to POST-only (no token fallback),
+   robust response parsing, clearer errors/logging.
+*/
+
 import React, { useState, useEffect, Component, ErrorInfo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
   Plus,
   Search,
@@ -32,6 +39,7 @@ import {
   Play,
 } from 'lucide-react';
 
+// -------------------- Interfaces --------------------
 interface GalleryItem {
   id: string;
   shootType: string;
@@ -62,7 +70,7 @@ interface UploadFile {
 interface DeleteError {
   Key: string;
   Code?: string;
-  Message: string;
+  Message?: string;
 }
 
 interface Notification {
@@ -71,6 +79,7 @@ interface Notification {
   type: 'success' | 'error' | 'info';
 }
 
+// -------------------- Error Boundary --------------------
 class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
 
@@ -96,6 +105,14 @@ class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { ha
   }
 }
 
+// -------------------- Configuration --------------------
+// main POST share endpoint (your API Gateway endpoint - POST only)
+const SHARE_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/default/sharelink';
+
+// If you want a default TTL for presigned links, set it here:
+const DEFAULT_EXPIRY_SECONDS = 3600;
+
+// -------------------- Main Component --------------------
 function Gallery() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -111,11 +128,8 @@ function Gallery() {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
-  const [previewModal, setPreviewModal] = useState<{
-    isOpen: boolean;
-    currentImage: GalleryItem | null;
-  }>({ isOpen: false, currentImage: null });
-  const [shareModal, setShareModal] = useState(false);
+  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; currentImage: GalleryItem | null; }>({ isOpen: false, currentImage: null });
+  const [shareModal, setShareModal] = useState<{ isOpen: boolean; links: string[]; serverMessage?: string | null }>({ isOpen: false, links: [], serverMessage: null });
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [filters, setFilters] = useState({
@@ -156,18 +170,20 @@ function Gallery() {
     'December',
   ];
 
-  // Add notification with auto-dismiss
+  // -------------------- Notifications --------------------
   const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
     setNotifications((prev) => [...prev, { id, message, type }]);
+    // auto-dismiss
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 5000);
   };
 
-  // Fetch gallery items based on current path (prefix)
+  // -------------------- Fetch gallery items --------------------
   useEffect(() => {
     fetchGalleryItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPath]);
 
   const fetchGalleryItems = async () => {
@@ -185,12 +201,11 @@ function Gallery() {
       console.log(`Fetching gallery items with prefix: '${prefix}'`);
 
       const response = await fetch(
-        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(
-          prefix
-        )}`,
+        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
         }
       );
 
@@ -206,23 +221,24 @@ function Gallery() {
 
       const mappedItems: GalleryItem[] = data.files.map((item: any) => {
         const keyParts = item.key.split('/');
-        const title = keyParts.pop()?.replace(/\.[^/.]+$/, '') || 'Untitled';
-        let eventDate = item.last_modified.split('T')[0];
+        const rawTitle = keyParts.pop() || 'Untitled';
+        const title = rawTitle.replace(/\.[^/.]+$/, '');
+        let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
 
         const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
         if (dateMatch) {
           eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
         }
 
-        const isVideo = item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
+        const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
 
         return {
           id: item.key,
           shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
           eventDate,
-          imageUrl: item.presigned_url || 'https://picsum.photos/400/300',
+          imageUrl: item.presigned_url || item.url || 'https://picsum.photos/400/300',
           title,
-          uploadDate: item.last_modified.split('T')[0],
+          uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
           isWatermarked: false,
           isPinProtected: false,
           isFavorite: false,
@@ -247,10 +263,358 @@ function Gallery() {
     }
   };
 
-  // Apply filters and sorting to images
+  // -------------------- Download helpers --------------------
+  // Try to fetch blob and save — if CORS blocks fetch, fallback to opening url in new tab (user can download from there).
+  const fetchBlobOrOpen = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+      const blob = await res.blob();
+      saveAs(blob, filename);
+      return true;
+    } catch (err: any) {
+      console.warn('Direct fetch failed (possibly CORS). Falling back to opening URL in new tab.', err);
+      // Fallback: open presigned url in new tab/window for user to download directly
+      try {
+        const newWin = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!newWin) {
+          addNotification('Could not open new tab for download — popup blocked.', 'error');
+          return false;
+        }
+        addNotification(`Opened download link in new tab for ${filename}`, 'info');
+        return true;
+      } catch (e) {
+        console.error('Fallback open failed', e);
+        addNotification(`Download failed: ${err.message}`, 'error');
+        return false;
+      }
+    }
+  };
+
+  // Create zip from array of {url, filename}
+  const createZipAndDownload = async (files: { url: string; filename: string }[], zipName: string) => {
+    const zip = new JSZip();
+    let added = 0;
+    for (const f of files) {
+      try {
+        const res = await fetch(f.url, { mode: 'cors' });
+        if (!res.ok) throw new Error(`Failed to fetch ${f.filename}: ${res.status}`);
+        const blob = await res.blob();
+        zip.file(f.filename, blob);
+        added += 1;
+      } catch (err) {
+        console.error(`Failed to add ${f.filename} to zip:`, err);
+        // continue — we will generate zip with available files
+      }
+    }
+    if (added === 0) {
+      addNotification('No files available to zip (all failed to fetch).', 'error');
+      return;
+    }
+    try {
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, zipName);
+      addNotification(`Downloaded ${added} file(s) as ${zipName}`, 'success');
+    } catch (err: any) {
+      console.error('Zip generation failed:', err);
+      addNotification(`Zip download failed: ${err.message}`, 'error');
+    }
+  };
+
+  // -------------------- Public download handlers --------------------
+  const handleDownloadItem = async (item: GalleryItem) => {
+    const filename = `${item.title}${item.isVideo ? '.mp4' : '.jpg'}`;
+    addNotification(`Starting download: ${filename}`, 'info');
+    await fetchBlobOrOpen(item.imageUrl, filename);
+  };
+
+  // Bulk download selected items/folders
+  const handleBulkDownload = async () => {
+    if (selectedItems.length === 0) {
+      addNotification('No items or folders selected for download', 'error');
+      return;
+    }
+
+    // separate item keys and folder paths
+    const selectedFiles = items.filter((it) => selectedItems.includes(it.id));
+    const selectedFolders = folders.filter((f) => selectedItems.includes(f.path));
+
+    // if exactly one file and no folders => direct download single
+    if (selectedFiles.length === 1 && selectedFolders.length === 0) {
+      await handleDownloadItem(selectedFiles[0]);
+      return;
+    }
+
+    // build file list to zip
+    const fileList: { url: string; filename: string }[] = [];
+
+    // add selected files
+    for (const it of selectedFiles) {
+      fileList.push({ url: it.imageUrl, filename: `${it.title}${it.isVideo ? '.mp4' : '.jpg'}` });
+    }
+
+    // for each selected folder, call your getallimages endpoint to list files inside and push into fileList
+    for (const folder of selectedFolders) {
+      try {
+        // Use the same getallimages lambda to list files under a prefix
+        let prefix = folder.path;
+        if (prefix.startsWith('/')) prefix = prefix.slice(1);
+        if (!prefix.endsWith('/')) prefix += '/';
+
+        const resp = await fetch(
+          `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' }, mode: 'cors' }
+        );
+
+        if (!resp.ok) {
+          console.warn('Folder listing failed for', folder.path, await resp.text());
+          continue;
+        }
+        const body = await resp.json();
+        if (body && Array.isArray(body.files)) {
+          for (const file of body.files) {
+            const url = file.presigned_url || file.url || file.presignedUrl;
+            const name = file.name || (file.key ? file.key.split('/').pop() : 'unnamed');
+            if (url) {
+              fileList.push({ url, filename: `${folder.name}/${name}` });
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error listing folder', folder.path, err);
+      }
+    }
+
+    if (fileList.length === 0) {
+      addNotification('No downloadable files found for selection', 'error');
+      return;
+    }
+
+    const zipName = `${(currentPath && currentPath !== '/' ? currentPath.replace(/^\//, '').replace(/\//g, '_') : 'gallery') || 'gallery'}_${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+    addNotification(`Preparing ${fileList.length} file(s) into ${zipName}`, 'info');
+    await createZipAndDownload(fileList, zipName);
+  };
+
+  // -------------------- Share helpers --------------------
+
+  /**
+   * requestShareLinksFromServer
+   * - Always does POST to SHARE_API with body: { keys, metadata? }
+   * - Expects server to return JSON. Accepts these shapes:
+   *    { success: true, shares: [{ prefix, token, shareUrl, expiry }, ...] }
+   *    { success: true, links: ["https://...","..."] }
+   *    { success: true, link: "single url" }
+   * - If server returns success:false -> throws with server message.
+   * - If server returns HTTP error -> throws with status + body.
+   */
+  // Replace your requestShareLinksFromServer with this exact function
+  const requestShareLinksFromServer = async (keys: string[], metadata: any = {}) => {
+    try {
+      if (!Array.isArray(keys) || keys.length === 0) {
+        throw new Error('No keys provided to requestShareLinksFromServer');
+      }
+
+      const body = { keys, metadata }; // include metadata (type: folder) if provided
+      console.debug('[share] POST payload', body);
+
+      const res = await fetch(SHARE_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify(body),
+      });
+
+      // read text so we can show helpful error messages when server returns non-JSON or 4xx/5xx
+      const txt = await res.text();
+      let parsed = null;
+      try {
+        parsed = txt ? JSON.parse(txt) : null;
+      } catch (e) {
+        parsed = null;
+      }
+
+      if (!res.ok) {
+        // Helpful path for debugging server responses
+        console.warn('[share] server returned non-OK:', res.status, txt);
+        // bubble up a helpful message
+        let serverMsg = txt;
+        if (parsed && parsed.message) serverMsg = parsed.message;
+        throw new Error(`Share server error: ${res.status} - ${serverMsg}`);
+      }
+
+      const data = parsed || (txt ? JSON.parse(txt) : null);
+
+      if (!data) {
+        throw new Error('Empty response from share server');
+      }
+      if (data.success === false) {
+        // if server returned structured error, include it
+        const serverErr = data.message || JSON.stringify(data);
+        throw new Error(serverErr);
+      }
+
+      // Accept various shapes
+      // 1) { success: true, shares: [{ prefix, token, shareUrl, expiry }, ...] }
+      if (Array.isArray((data as any).shares) && (data as any).shares.length > 0) {
+        const urls: string[] = (data as any).shares
+          .map((s: any) => s.shareUrl || s.link || s.presigned_url || s.url)
+          .filter(Boolean);
+        if (urls.length > 0) return urls;
+      }
+
+      // 2) older shape: { links: [...] }
+      if (Array.isArray((data as any).links) && (data as any).links.length > 0) {
+        const urls: string[] = (data as any).links.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
+        if (urls.length) return urls;
+      }
+
+      // 3) single link
+      if ((data as any).link && typeof (data as any).link === 'string') {
+        return [(data as any).link];
+      }
+
+      // 4) top-level array
+      if (Array.isArray(data)) {
+        const urls: string[] = data.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
+        if (urls.length) return urls;
+      }
+
+      throw new Error('Unexpected share server response format: ' + JSON.stringify(data));
+    } catch (err: any) {
+      console.error('requestShareLinksFromServer failed:', err);
+      throw err;
+    }
+  };
+
+
+
+  /**
+   * generateShareableLinks
+   * Accepts selected IDs (either item.key or folder.path).
+   * For files: tries to use item.imageUrl if present, otherwise asks server for presigned link.
+   * For folders: calls server to presign objects under prefixes.
+   * Returns string[] of links.
+   */
+  const generateShareableLinks = async (forItemIds: string[]) => {
+    const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
+    const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
+    const links: string[] = [];
+
+    // Items that already have direct URLs
+    if (itemIds.length > 0) {
+      const itemsToShare = items.filter((it) => itemIds.includes(it.id));
+      const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
+      const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
+
+      if (directUrls.length > 0) {
+        links.push(...directUrls);
+      }
+      if (missingKeys.length > 0) {
+        // request presigned urls for these keys
+        const created = await requestShareLinksFromServer(missingKeys);
+        links.push(...created);
+      }
+    }
+
+    if (folderPaths.length > 0) {
+      // convert to prefixes expected by backend (remove leading slash, ensure trailing slash)
+      const prefixes = folderPaths.map((p) => (p.startsWith('/') ? p.slice(1) : p)).map((p) => (p.endsWith('/') ? p : `${p}/`));
+
+      // Server expects keys array: we will pass prefixes and metadata indicating folder share
+      try {
+        const created = await requestShareLinksFromServer(prefixes, { type: 'folder' });
+        links.push(...created);
+      } catch (err) {
+        // rethrow to allow caller show message, handled below
+        throw err;
+      }
+    }
+
+    return links;
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        addNotification('Link copied to clipboard', 'success');
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        addNotification('Link copied to clipboard', 'success');
+      }
+    } catch (err: any) {
+      console.error('Copy failed:', err);
+      addNotification('Failed to copy link', 'error');
+    }
+  };
+
+  const handleShare = async () => {
+    if (selectedItems.length === 0) {
+      addNotification('No items selected to share', 'error');
+      return;
+    }
+    try {
+      addNotification('Generating share link(s)...', 'info');
+      const links = await generateShareableLinks(selectedItems);
+
+      if (links.length === 0) {
+        addNotification('No share links generated', 'error');
+        return;
+      }
+
+      // If multiple links returned, open the modal and show them.
+      // Optionally, you can choose to combine them server-side into one downloadable zip link.
+      setShareModal({ isOpen: true, links, serverMessage: null });
+    } catch (err: any) {
+      console.error('Share error:', err);
+      // If server returned a JSON stringified error (we threw JSON), try to extract message
+      let message = err.message || 'Share failed';
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed && parsed.message) message = parsed.message;
+        else if (parsed && typeof parsed === 'object') message = JSON.stringify(parsed);
+      } catch (e) {
+        // not JSON
+      }
+      addNotification(`Share failed: ${message}`, 'error');
+      setError(`Share failed: ${message}`);
+      // show share modal with server message where applicable
+      setShareModal({ isOpen: true, links: [], serverMessage: message });
+    }
+  };
+
+  const handleShareSingle = async (item: GalleryItem) => {
+    const link = item.imageUrl;
+    if (link) {
+      // If it already has a direct URL, show share modal with that link
+      setShareModal({ isOpen: true, links: [link], serverMessage: null });
+      return;
+    }
+
+    // Otherwise, ask server for a presigned url for the single key
+    try {
+      const created = await requestShareLinksFromServer([item.key || item.id]);
+      if (created && created.length) {
+        setShareModal({ isOpen: true, links: created, serverMessage: null });
+      } else {
+        addNotification('No share link created', 'error');
+      }
+    } catch (err: any) {
+      console.error('Share single failed:', err);
+      addNotification(`Share failed: ${err.message}`, 'error');
+      setShareModal({ isOpen: true, links: [], serverMessage: err.message });
+    }
+  };
+
+  // -------------------- Filters & sorting (unchanged logic from original) --------------------
   const filteredImages = items
     .filter((item) => {
-      const eventDate = new Date(item.eventDate);
+      const eventDate = item.eventDate ? new Date(item.eventDate) : new Date(item.uploadDate || Date.now());
       const itemMonth = eventDate.toLocaleString('default', { month: 'long' });
 
       const matchesMonth = !filters.month || itemMonth === filters.month;
@@ -290,7 +654,7 @@ function Gallery() {
       }
     });
 
-  // Generate breadcrumbs
+  // -------------------- Breadcrumbs --------------------
   const getBreadcrumbs = () => {
     const parts = currentPath.split('/').filter(Boolean);
     const breadcrumbs = [{ name: 'Gallery', path: '' }];
@@ -304,7 +668,7 @@ function Gallery() {
     return breadcrumbs;
   };
 
-  // Event handlers
+  // -------------------- UI Event handlers --------------------
   const handleFilterChange = (filterType: string, value: string | boolean) => {
     setFilters((prev) => ({ ...prev, [filterType]: value }));
   };
@@ -344,32 +708,14 @@ function Gallery() {
     setSelectedItems([]);
   };
 
-  const handleDownload = (items: GalleryItem[]) => {
-    items.forEach((item) => {
-      const link = document.createElement('a');
-      link.href = item.imageUrl;
-      link.download = `${item.title}${item.isVideo ? '.mp4' : '.jpg'}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  // Compatibility wrapper used on per-item download button
+  const handleDownload = (itemsToDownload: GalleryItem[]) => {
+    itemsToDownload.forEach((item) => {
+      handleDownloadItem(item);
     });
   };
 
-  const handleBulkDownload = () => {
-    const itemsToDownload = filteredImages.filter((item) => selectedItems.includes(item.id));
-    handleDownload(itemsToDownload);
-  };
-
-  const handleShare = () => {
-    setShareModal(true);
-  };
-
-  const handleToggleFavorite = (item: GalleryItem) => {
-    setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !i.isFavorite } : i))
-    );
-  };
-
+  // -------------------- Delete logic (keeps your previous API usage) --------------------
   const handleBulkDelete = () => {
     handleDeleteItems(selectedItems);
   };
@@ -432,6 +778,7 @@ function Gallery() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ keys }),
+          mode: 'cors',
         }
       );
 
@@ -480,14 +827,23 @@ function Gallery() {
     handleDeleteItems([id]);
   };
 
-  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    if (!e.currentTarget.src.includes('picsum.photos')) {
-      console.error(`Media failed to load: ${e.currentTarget.src}`);
-      e.currentTarget.src = 'https://picsum.photos/400/300';
+  const handleToggleFavorite = (item: GalleryItem) => {
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !i.isFavorite } : i))
+    );
+  };
+
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement | HTMLVideoElement>) => {
+    const tgt = e.currentTarget as HTMLImageElement | HTMLVideoElement;
+    if ('src' in tgt && typeof tgt.src === 'string' && !tgt.src.includes('picsum.photos')) {
+      // Only change image src (not video) --- for video we leave it as-is
+      if ((tgt as HTMLImageElement).tagName === 'IMG') {
+        (tgt as HTMLImageElement).src = 'https://picsum.photos/400/300';
+      }
     }
   };
 
-  // Create folder handler
+  // -------------------- Create folder --------------------
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) {
       setError('Folder name is required');
@@ -508,6 +864,7 @@ function Gallery() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: folderKey }),
+        mode: 'cors',
       });
 
       if (!response.ok) {
@@ -532,7 +889,7 @@ function Gallery() {
     }
   };
 
-  // Upload handlers
+  // -------------------- Upload handlers --------------------
   const handleFileSelect = (selectedFiles: FileList | null) => {
     if (!selectedFiles) return;
 
@@ -559,7 +916,6 @@ function Gallery() {
     if (filesToUpload.length === 0) return;
 
     try {
-      // Format prefix from currentPath
       let prefix = currentPath;
       if (prefix.startsWith('/')) prefix = prefix.slice(1);
       if (prefix && !prefix.endsWith('/')) prefix += '/';
@@ -581,6 +937,7 @@ function Gallery() {
           files: filesToUpload.map((f) => f.file.name),
           folder: prefix,
         }),
+        mode: 'cors',
       });
 
       console.log('Lambda request body:', JSON.stringify({
@@ -645,6 +1002,7 @@ function Gallery() {
             method: 'PUT',
             body: file.file,
             headers: { 'Content-Type': file.file.type },
+            // don't set mode:'no-cors' - that would make response opaque and success-check impossible
           });
 
           if (!uploadResponse.ok) {
@@ -689,6 +1047,7 @@ function Gallery() {
     }
   };
 
+  // -------------------- Render UI --------------------
   return (
     <GalleryErrorBoundary>
       <div className="min-h-screen bg-gray-50 flex">
@@ -1097,6 +1456,7 @@ function Gallery() {
                                 src={item.imageUrl}
                                 className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
                                 onError={handleImageError}
+                                controls={false}
                               />
                               <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-white opacity-75" />
                             </div>
@@ -1141,6 +1501,12 @@ function Gallery() {
                               className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
                             >
                               <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleShareSingle(item)}
+                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                            >
+                              <Share2 className="w-4 h-4" />
                             </button>
                             {deleteLoading.includes(item.id) ? (
                               <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
@@ -1191,40 +1557,70 @@ function Gallery() {
                   <p className="font-medium text-[#2D2D2D]">{previewModal.currentImage.title}</p>
                   <p className="text-sm text-gray-500">{previewModal.currentImage.shootType}</p>
                   <p className="text-sm text-gray-500">{previewModal.currentImage.eventDate}</p>
+                  <div className="mt-3 flex space-x-2">
+                    <button
+                      onClick={() => handleDownloadItem(previewModal.currentImage!)}
+                      className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg text-sm"
+                    >
+                      <Download className="w-4 h-4 inline mr-1" />
+                      Download
+                    </button>
+                    <button
+                      onClick={() => handleShareSingle(previewModal.currentImage!)}
+                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
+                    >
+                      <Share2 className="w-4 h-4 inline mr-1" />
+                      Share
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {/* Share Modal */}
-          {shareModal && (
+          {shareModal.isOpen && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
               <div className="bg-white rounded-lg p-6 w-full max-w-md">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-[#2D2D2D]">Share Media</h3>
                   <button
-                    onClick={() => setShareModal(false)}
+                    onClick={() => setShareModal({ isOpen: false, links: [], serverMessage: null })}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Shareable Link</label>
-                    <div className="flex items-center space-x-2">
+                  {shareModal.serverMessage && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                      <strong className="text-sm text-yellow-700">Share server message:</strong>
+                      <div className="text-sm text-yellow-800 mt-1">{shareModal.serverMessage}</div>
+                    </div>
+                  )}
+
+                  {shareModal.links.length === 0 && !shareModal.serverMessage && (
+                    <p className="text-gray-500">No links yet.</p>
+                  )}
+
+                  {shareModal.links.map((link, idx) => (
+                    <div key={idx} className="flex items-center space-x-2">
                       <input
                         type="text"
-                        value="https://example.com/share/123"
+                        value={link}
                         readOnly
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
                       />
-                      <button className="p-2 text-[#00BCEB] hover:text-[#00A5CF]">
+                      <button
+                        onClick={() => copyToClipboard(link)}
+                        className="p-2 text-[#00BCEB] hover:text-[#00A5CF]"
+                      >
                         <Copy className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
-                  <div>
+                  ))}
+
+                  {/* <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                     <div className="flex items-center space-x-2">
                       <input
@@ -1236,23 +1632,24 @@ function Gallery() {
                         <Mail className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
+                  </div> */}
+
                   <div className="flex justify-end space-x-2">
                     <button
-                      onClick={() => setShareModal(false)}
+                      onClick={() => setShareModal({ isOpen: false, links: [], serverMessage: null })}
                       className="px-4 py-2 text-gray-600 hover:text-gray-800"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={() => {
-                        // Implement share logic
-                        setShareModal(false);
-                        addNotification('Link shared successfully', 'success');
+                        // placeholder: if you have server-side share/email logic, call it here
+                        setShareModal({ isOpen: false, links: [], serverMessage: null });
+                        addNotification('Link(s) prepared for sharing', 'success');
                       }}
                       className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
                     >
-                      Share
+                      Done
                     </button>
                   </div>
                 </div>
