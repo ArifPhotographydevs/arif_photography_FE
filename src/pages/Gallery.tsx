@@ -252,8 +252,35 @@ function Gallery() {
         path: `/${folder.path.replace(/\/$/, '')}`,
       }));
 
+      // Also fetch favorites folders if we're in root directory
+      let favoritesFolders: FolderItem[] = [];
+      if (!prefix || prefix === '') {
+        try {
+          const favoritesResponse = await fetch(
+            `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=favorites/`,
+            {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              mode: 'cors',
+            }
+          );
+          
+          if (favoritesResponse.ok) {
+            const favoritesData = await favoritesResponse.json();
+            if (favoritesData && Array.isArray(favoritesData.folders)) {
+              favoritesFolders = favoritesData.folders.map((folder: any) => ({
+                name: `❤️ ${folder.name}`,
+                path: `/${folder.path.replace(/\/$/, '')}`,
+              }));
+            }
+          }
+        } catch (err) {
+          console.log('Could not fetch favorites folders:', err);
+        }
+      }
+
       setItems(mappedItems);
-      setFolders(mappedFolders);
+      setFolders([...mappedFolders, ...favoritesFolders]);
     } catch (err: any) {
       console.error('Error fetching gallery items:', err);
       setError(`Failed to load gallery items: ${err.message}`);
@@ -558,33 +585,44 @@ function Gallery() {
       addNotification('No items selected to share', 'error');
       return;
     }
-    try {
-      addNotification('Generating share link(s)...', 'info');
-      const links = await generateShareableLinks(selectedItems);
-
-      if (links.length === 0) {
-        addNotification('No share links generated', 'error');
-        return;
-      }
-
-      // If multiple links returned, open the modal and show them.
-      // Optionally, you can choose to combine them server-side into one downloadable zip link.
-      setShareModal({ isOpen: true, links, serverMessage: null });
-    } catch (err: any) {
-      console.error('Share error:', err);
-      // If server returned a JSON stringified error (we threw JSON), try to extract message
-      let message = err.message || 'Share failed';
+    
+    // Check if any folders are selected
+    const selectedFolders = selectedItems.filter((id) => id.startsWith('/'));
+    
+    if (selectedFolders.length > 0) {
+      // If folders are selected, navigate to shared images page
+      // For now, take the first selected folder (can be enhanced to handle multiple)
+      const firstFolder = selectedFolders[0];
+      const encodedPath = encodeURIComponent(firstFolder);
+      navigate(`/shared-images/${encodedPath}`);
+    } else {
+      // If only images are selected, use the original share modal behavior
       try {
-        const parsed = JSON.parse(message);
-        if (parsed && parsed.message) message = parsed.message;
-        else if (parsed && typeof parsed === 'object') message = JSON.stringify(parsed);
-      } catch (e) {
-        // not JSON
+        addNotification('Generating share link(s)...', 'info');
+        const links = await generateShareableLinks(selectedItems);
+
+        if (links.length === 0) {
+          addNotification('No share links generated', 'error');
+          return;
+        }
+
+        setShareModal({ isOpen: true, links, serverMessage: null });
+      } catch (err: any) {
+        console.error('Share error:', err);
+        // If server returned a JSON stringified error (we threw JSON), try to extract message
+        let message = err.message || 'Share failed';
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed && parsed.message) message = parsed.message;
+          else if (parsed && typeof parsed === 'object') message = JSON.stringify(parsed);
+        } catch (e) {
+          // not JSON
+        }
+        addNotification(`Share failed: ${message}`, 'error');
+        setError(`Share failed: ${message}`);
+        // show share modal with server message where applicable
+        setShareModal({ isOpen: true, links: [], serverMessage: message });
       }
-      addNotification(`Share failed: ${message}`, 'error');
-      setError(`Share failed: ${message}`);
-      // show share modal with server message where applicable
-      setShareModal({ isOpen: true, links: [], serverMessage: message });
     }
   };
 

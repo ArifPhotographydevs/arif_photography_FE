@@ -16,6 +16,7 @@ import ProjectWorkspace from './pages/ProjectWorkspace';
 import Calendar from './pages/Calendar';
 import Gallery from './pages/Gallery';
 import GalleryUpload from './pages/GalleryUpload';
+import SharedImages from './pages/SharedImages';
 import ClientGallery from './pages/ClientGallery';
 import Clients from './pages/Clients';
 import TeamManagement from './pages/TeamManagement';
@@ -109,6 +110,10 @@ function App() {
         <Route
           path="/gallery"
           element={isAuthenticated ? <Gallery /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/shared-images/:folderPath"
+          element={isAuthenticated ? <SharedImages /> : <Navigate to="/login" replace />}
         />
       <Route
   path="/gallery/upload/:projectId"
