@@ -92,12 +92,13 @@ function SharedImages() {
       const foldersData: ApiResponse = await foldersResponse.json();
       console.log('Folders data:', foldersData);
 
-      // Map folders
+      // Map folders - handle case where folders array might be empty
       const mappedFolders: FolderItem[] = foldersData.folders ? foldersData.folders.map((folder: any) => ({
         name: folder.name,
         path: folder.path,
       })) : [];
 
+      console.log('Mapped folders:', mappedFolders);
       setFolders(mappedFolders);
 
       // Then fetch all images recursively (including subfolders)
@@ -209,10 +210,11 @@ function SharedImages() {
         .map(item => item.key || item.id); // Use key if available, fallback to id
       
       console.log('=== SELECTION DEBUG INFO ===');
-      console.log('All items:', items.map(item => ({ id: item.id, key: item.key, title: item.title })));
+      console.log('All items:', items.map(item => ({ id: item.id, key: item.key, title: item.title, imageUrl: item.imageUrl })));
       console.log('Selected item IDs:', selectedItems);
       console.log('Selected image keys:', selectedImageKeys);
       console.log('Selected items details:', items.filter(item => selectedItems.includes(item.id)));
+      console.log('Source folder:', decodedFolderPath);
       console.log('=== END SELECTION DEBUG ===');
       
       const result = await createFavoritesFolderAPI({

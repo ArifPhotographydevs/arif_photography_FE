@@ -94,34 +94,14 @@ export const createFavoritesFolderAPI = async (data: {
       const errorText1 = await uploadResponse.text();
       console.error('Upload approach 1 failed:', uploadResponse.status, errorText1);
       
-      // Try approach 2: Just filenames
-      console.log('Trying approach 2: Just filenames');
+      // Try approach 2: Use full S3 keys as source paths
+      console.log('Trying approach 2: Full S3 keys as source paths');
       
-      const imageFilenames = data.imageKeys.map(key => {
-        // Remove the source folder path from the key
-        const sourcePath = data.sourceFolder.replace(/^\/+/, '').replace(/\/+$/, '');
-        let filename = key;
-        
-        console.log(`Processing key: "${key}", sourcePath: "${sourcePath}"`);
-        
-        // If the key starts with the source path, remove it
-        if (sourcePath && key.startsWith(sourcePath + '/')) {
-          filename = key.substring(sourcePath.length + 1);
-          console.log(`Removed source path with slash: "${filename}"`);
-        } else if (sourcePath && key.startsWith(sourcePath)) {
-          filename = key.substring(sourcePath.length);
-          console.log(`Removed source path without slash: "${filename}"`);
-        }
-        
-        // If there are still path separators, get just the filename
-        const keyParts = filename.split('/');
-        const finalFilename = keyParts[keyParts.length - 1];
-        console.log(`Final filename: "${finalFilename}"`);
-        return finalFilename;
-      });
+      console.log('Original image keys:', data.imageKeys);
+      console.log('Target folder path:', folderPath);
       
       const uploadPayload2 = {
-        files: imageFilenames,
+        files: data.imageKeys, // Use full S3 keys as source paths
         folder: folderPath
       };
       
@@ -139,7 +119,36 @@ export const createFavoritesFolderAPI = async (data: {
       if (!uploadResponse.ok) {
         const errorText2 = await uploadResponse.text();
         console.error('Upload approach 2 failed:', uploadResponse.status, errorText2);
-        throw new Error(`Both upload approaches failed. Approach 1: ${errorText1}, Approach 2: ${errorText2}`);
+        
+        // Try approach 3: Just filenames
+        console.log('Trying approach 3: Just filenames');
+        
+        const imageFilenames = data.imageKeys.map(key => {
+          const keyParts = key.split('/');
+          return keyParts[keyParts.length - 1]; // Get just the filename
+        });
+        
+        const uploadPayload3 = {
+          files: imageFilenames,
+          folder: folderPath
+        };
+        
+        console.log('Upload payload 3 (just filenames):', uploadPayload3);
+        
+        uploadResponse = await fetch(BULK_UPLOAD_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(uploadPayload3)
+        });
+
+        console.log('Upload response 3 status:', uploadResponse.status);
+        console.log('Upload response 3 ok:', uploadResponse.ok);
+
+        if (!uploadResponse.ok) {
+          const errorText3 = await uploadResponse.text();
+          console.error('Upload approach 3 failed:', uploadResponse.status, errorText3);
+          throw new Error(`All upload approaches failed. Approach 1: ${errorText1}, Approach 2: ${errorText2}, Approach 3: ${errorText3}`);
+        }
       }
     }
 
