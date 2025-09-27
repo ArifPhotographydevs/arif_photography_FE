@@ -47,6 +47,7 @@ function SharedImages() {
   const navigate = useNavigate();
   
   const [items, setItems] = useState<GalleryItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -72,10 +73,35 @@ function SharedImages() {
         prefix = prefix.slice(1);
       }
 
-      console.log(`Fetching all images recursively with prefix: '${prefix}'`);
+      console.log(`Fetching folders and images with prefix: '${prefix}'`);
 
-      // Fetch all images recursively (including subfolders)
-      const response = await fetch(
+      // First fetch folders (non-recursive to get immediate subfolders)
+      const foldersResponse = await fetch(
+        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+        }
+      );
+
+      if (!foldersResponse.ok) {
+        throw new Error(`Failed to fetch folders: ${foldersResponse.status} ${foldersResponse.statusText}`);
+      }
+
+      const foldersData: ApiResponse = await foldersResponse.json();
+      console.log('Folders data:', foldersData);
+
+      // Map folders
+      const mappedFolders: FolderItem[] = foldersData.folders ? foldersData.folders.map((folder: any) => ({
+        name: folder.name,
+        path: folder.path,
+      })) : [];
+
+      setFolders(mappedFolders);
+
+      // Then fetch all images recursively (including subfolders)
+      const imagesResponse = await fetch(
         `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
         {
           method: 'GET',
@@ -84,11 +110,11 @@ function SharedImages() {
         }
       );
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch items: ${response.status} ${response.statusText}`);
+      if (!imagesResponse.ok) {
+        throw new Error(`Failed to fetch images: ${imagesResponse.status} ${imagesResponse.statusText}`);
       }
 
-      const data: ApiResponse = await response.json();
+      const data: ApiResponse = await imagesResponse.json();
 
       if (!data || !Array.isArray(data.files)) {
         throw new Error('Unexpected API response format');
@@ -154,6 +180,11 @@ function SharedImages() {
     } else {
       setSelectedItems(items.map(item => item.id));
     }
+  };
+
+  const handleFolderClick = (folderPath: string) => {
+    const encodedPath = encodeURIComponent(folderPath);
+    navigate(`/shared-images/${encodedPath}`);
   };
 
   const handleCreateFavoritesFolder = async () => {
@@ -404,13 +435,46 @@ function SharedImages() {
         )}
 
         {/* Items Grid/List */}
-        {items.length === 0 ? (
+        {/* Folders Section */}
+        {folders.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Folders</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {folders.map((folder) => (
+                <div
+                  key={folder.path}
+                  onClick={() => handleFolderClick(folder.path)}
+                  className="relative group bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
+                >
+                  <div className="aspect-square bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+                    <FolderPlus className="h-12 w-12 text-blue-500" />
+                  </div>
+                  <div className="p-3">
+                    <h3 className="text-sm font-medium text-gray-900 truncate" title={folder.name}>
+                      {folder.name}
+                    </h3>
+                    <p className="text-xs text-gray-500 truncate" title={folder.path}>
+                      {folder.path}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Images Section */}
+        {items.length === 0 && folders.length === 0 ? (
           <div className="text-center py-12">
             <FolderPlus className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No images found</h3>
-            <p className="text-gray-500">This folder doesn't contain any images.</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No content found</h3>
+            <p className="text-gray-500">This folder doesn't contain any images or subfolders.</p>
           </div>
-        ) : (
+        ) : items.length > 0 ? (
+          <div>
+            {folders.length > 0 && (
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Images</h2>
+            )}
           <div className={viewMode === 'grid' 
             ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4'
             : 'space-y-2'
@@ -475,7 +539,8 @@ function SharedImages() {
               </div>
             ))}
           </div>
-        )}
+          </div>
+        ) : null}
       </div>
 
       {/* Favorites Modal */}
