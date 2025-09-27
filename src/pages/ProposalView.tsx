@@ -840,7 +840,6 @@ function ProposalView() {
                 alt="Arifphotography Logo"
                 className="h-12 w-auto mx-auto mb-4"
               />
-              <p className="text-gray-500 text-sm">Powered by Huemn</p>
             </div>
           </div>
         </div>
