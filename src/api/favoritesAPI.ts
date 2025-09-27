@@ -98,8 +98,26 @@ export const createFavoritesFolderAPI = async (data: {
       console.log('Trying approach 2: Just filenames');
       
       const imageFilenames = data.imageKeys.map(key => {
-        const keyParts = key.split('/');
-        return keyParts[keyParts.length - 1]; // Get just the filename
+        // Remove the source folder path from the key
+        const sourcePath = data.sourceFolder.replace(/^\/+/, '').replace(/\/+$/, '');
+        let filename = key;
+        
+        console.log(`Processing key: "${key}", sourcePath: "${sourcePath}"`);
+        
+        // If the key starts with the source path, remove it
+        if (sourcePath && key.startsWith(sourcePath + '/')) {
+          filename = key.substring(sourcePath.length + 1);
+          console.log(`Removed source path with slash: "${filename}"`);
+        } else if (sourcePath && key.startsWith(sourcePath)) {
+          filename = key.substring(sourcePath.length);
+          console.log(`Removed source path without slash: "${filename}"`);
+        }
+        
+        // If there are still path separators, get just the filename
+        const keyParts = filename.split('/');
+        const finalFilename = keyParts[keyParts.length - 1];
+        console.log(`Final filename: "${finalFilename}"`);
+        return finalFilename;
       });
       
       const uploadPayload2 = {
