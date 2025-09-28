@@ -118,12 +118,12 @@ function Header({ title, sidebarCollapsed }: HeaderProps) {
                   >
                     Profile
                   </a>
-                  <a
+                  {/* <a
                     href="/settings"
                     className="block px-4 py-2 text-sm text-[#2D2D2D] hover:bg-gray-100 rounded"
                   >
                     Settings
-                  </a>
+                  </a> */}
                   <hr className="my-2" />
                   <button
                     onClick={handleLogout}

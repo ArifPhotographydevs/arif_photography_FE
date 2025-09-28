@@ -1,3 +1,4 @@
+
 // Test function to verify API endpoints work
 export const testAPIs = async () => {
   console.log('=== TESTING APIs ===');
@@ -7,7 +8,7 @@ export const testAPIs = async () => {
     const testFolderResponse = await fetch(CREATE_FOLDER_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'test-folder/' })
+      body: JSON.stringify({ key: 'projects/client%20selection/prabhas__prabhas_wedding_2025-08-09/' })
     });
     console.log('Test folder creation:', testFolderResponse.status, await testFolderResponse.text());
   } catch (error) {
@@ -20,8 +21,8 @@ export const testAPIs = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        files: ['test-image.jpg'],
-        folder: 'test-folder/'
+        files: ['projects/gallery/prabhas__prabhas_wedding_2025-08-09/Snapchat-870713468.jpg'],
+        folder: 'projects/client%20selection/prabhas__prabhas_wedding_2025-08-09/'
       })
     });
     console.log('Test bulk upload:', testUploadResponse.status, await testUploadResponse.text());
@@ -34,7 +35,7 @@ export const testAPIs = async () => {
 
 // Real API endpoints for creating folders and uploading images
 const CREATE_FOLDER_API = 'https://n7l9v29nb4.execute-api.eu-north-1.amazonaws.com/default/createfolder';
-const BULK_UPLOAD_API = 'https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload';
+const BULK_UPLOAD_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/default/sharelink';
 
 export const createFavoritesFolderAPI = async (data: {
   folderName: string;
@@ -43,13 +44,17 @@ export const createFavoritesFolderAPI = async (data: {
 }) => {
   try {
     console.log('Creating new folder and uploading images:', data);
-    
+
+    // Extract projectName from sourceFolder
+    const pathSegments = data.sourceFolder.split('/');
+    const galleryIndex = pathSegments.indexOf('gallery');
+    const projectName = galleryIndex !== -1 && galleryIndex + 1 < pathSegments.length ? pathSegments[galleryIndex + 1] : data.sourceFolder.split('/').pop() || 'default';
+    console.log('Derived projectName from sourceFolder:', projectName);
+
+    // Construct the full folder path using folderName and projectName
+    const folderPath = `projects/${data.folderName}/${projectName}/`;
+
     // Step 1: Create the folder in parent directory
-    // Extract parent directory from sourceFolder
-    const sourcePath = data.sourceFolder.replace(/^\/+/, '').replace(/\/+$/, ''); // Remove leading/trailing slashes
-    const parentPath = sourcePath ? `${sourcePath}/` : '';
-    const folderPath = `${parentPath}favorites/${data.folderName}/`;
-    
     const createFolderResponse = await fetch(CREATE_FOLDER_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -59,7 +64,8 @@ export const createFavoritesFolderAPI = async (data: {
     });
 
     if (!createFolderResponse.ok) {
-      throw new Error(`Failed to create folder: ${createFolderResponse.status}`);
+      const errorText = await createFolderResponse.text();
+      throw new Error(`Failed to create folder: ${createFolderResponse.status} ${errorText}`);
     }
 
     const createFolderResult = await createFolderResponse.json();
@@ -70,107 +76,57 @@ export const createFavoritesFolderAPI = async (data: {
     console.log('Original image keys:', data.imageKeys);
     console.log('Target folder path:', folderPath);
     console.log('Number of images to upload:', data.imageKeys.length);
-    
-    // Try different approaches for the upload
-    console.log('Trying approach 1: Full S3 keys');
-    
-    const uploadPayload1 = {
+
+    const uploadPayload = {
       files: data.imageKeys, // Full S3 keys
       folder: folderPath
     };
-    
-    console.log('Upload payload 1 (full keys):', uploadPayload1);
-    
-    let uploadResponse = await fetch(BULK_UPLOAD_API, {
+
+    // Log the exact stringified payload
+    const stringifiedPayload = JSON.stringify(uploadPayload);
+    console.log('Stringified upload payload:', stringifiedPayload);
+
+    const uploadResponse = await fetch(BULK_UPLOAD_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(uploadPayload1)
+      body: stringifiedPayload
     });
 
-    console.log('Upload response 1 status:', uploadResponse.status);
-    console.log('Upload response 1 ok:', uploadResponse.ok);
+    console.log('Upload response status:', uploadResponse.status);
+    console.log('Upload response ok:', uploadResponse.ok);
 
     if (!uploadResponse.ok) {
-      const errorText1 = await uploadResponse.text();
-      console.error('Upload approach 1 failed:', uploadResponse.status, errorText1);
-      
-      // Try approach 2: Use full S3 keys as source paths
-      console.log('Trying approach 2: Full S3 keys as source paths');
-      
-      console.log('Original image keys:', data.imageKeys);
-      console.log('Target folder path:', folderPath);
-      
-      const uploadPayload2 = {
-        files: data.imageKeys, // Use full S3 keys as source paths
-        folder: folderPath
-      };
-      
-      console.log('Upload payload 2 (filenames):', uploadPayload2);
-      
-      uploadResponse = await fetch(BULK_UPLOAD_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(uploadPayload2)
-      });
-
-      console.log('Upload response 2 status:', uploadResponse.status);
-      console.log('Upload response 2 ok:', uploadResponse.ok);
-
-      if (!uploadResponse.ok) {
-        const errorText2 = await uploadResponse.text();
-        console.error('Upload approach 2 failed:', uploadResponse.status, errorText2);
-        
-        // Try approach 3: Just filenames
-        console.log('Trying approach 3: Just filenames');
-        
-        const imageFilenames = data.imageKeys.map(key => {
-          const keyParts = key.split('/');
-          return keyParts[keyParts.length - 1]; // Get just the filename
-        });
-        
-        const uploadPayload3 = {
-          files: imageFilenames,
-          folder: folderPath
-        };
-        
-        console.log('Upload payload 3 (just filenames):', uploadPayload3);
-        
-        uploadResponse = await fetch(BULK_UPLOAD_API, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(uploadPayload3)
-        });
-
-        console.log('Upload response 3 status:', uploadResponse.status);
-        console.log('Upload response 3 ok:', uploadResponse.ok);
-
-        if (!uploadResponse.ok) {
-          const errorText3 = await uploadResponse.text();
-          console.error('Upload approach 3 failed:', uploadResponse.status, errorText3);
-          throw new Error(`All upload approaches failed. Approach 1: ${errorText1}, Approach 2: ${errorText2}, Approach 3: ${errorText3}`);
-        }
-      }
+      const errorText = await uploadResponse.text();
+      console.error('Upload failed:', uploadResponse.status, errorText);
+      throw new Error(`Upload failed: ${uploadResponse.status} ${errorText}`);
     }
 
     const uploadResult = await uploadResponse.json();
     console.log('Final upload result:', uploadResult);
-    
-    // Step 3: Verify the folder was created and contains images
+
+    // Adjust folderPath if Lambda returns a default (e.g., '/fav/')
+    const adjustedFolderPath = uploadResult.folderPath === '/fav/' ? folderPath : uploadResult.folderPath;
+
+    // Step 3: Verify the folder was created and contains images (with delay for S3 propagation)
     console.log('=== VERIFICATION STEP ===');
     try {
+      await new Promise(resolve => setTimeout(resolve, 3000)); // 3-second delay
       const verifyResponse = await fetch(
-        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(folderPath)}`,
+        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(adjustedFolderPath.replace(/^\/+/, ''))}&recursive=true`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
           mode: 'cors',
         }
       );
-      
+
       if (verifyResponse.ok) {
         const verifyData = await verifyResponse.json();
         console.log('Verification - Folder contents:', verifyData);
         console.log('Verification - Files count:', verifyData.files?.length || 0);
+        if (verifyData.files?.length === 0) {
+          console.warn('No files found after upload. Check S3 consistency or API prefix.');
+        }
       } else {
         console.error('Verification failed:', verifyResponse.status);
       }
@@ -180,17 +136,17 @@ export const createFavoritesFolderAPI = async (data: {
     console.log('=== END VERIFICATION ===');
     console.log('=== END UPLOAD DEBUG ===');
 
-    // Return success response
+    // Return success response with adjusted folder path
     return {
       success: true,
-      message: `New folder "${data.folderName}" created successfully in parent directory! ${data.imageKeys.length} images uploaded to the folder.`,
+      message: `New folder "${projectName}" created successfully under ${data.folderName}! ${data.imageKeys.length} images uploaded to the folder.`,
       folderId: `favorites_${Date.now()}`,
-      folderPath: `/${folderPath}`, // Parent directory favorites folder
-      folderName: data.folderName,
+      folderPath: adjustedFolderPath,
+      folderName: projectName,
       imageCount: data.imageKeys.length,
       uploadedImages: data.imageKeys.map((key, index) => ({
         originalKey: key,
-        newKey: `${folderPath}${key.split('/').pop()}`,
+        newKey: `${adjustedFolderPath}${key.split('/').pop()}`,
         uploadStatus: 'success',
         uploadedAt: new Date().toISOString()
       })),
@@ -202,7 +158,7 @@ export const createFavoritesFolderAPI = async (data: {
     console.error('Error details:', {
       message: error.message,
       stack: error.stack,
-      folderPath,
+      sourceFolder: data.sourceFolder,
       imageKeys: data.imageKeys
     });
     throw new Error(`Failed to create folder and upload images: ${error.message}`);
@@ -229,7 +185,7 @@ export const getFavoritesFoldersAPI = async () => {
         thumbnail: 'https://picsum.photos/200/200?random=1'
       },
       {
-        id: 'favorites_2', 
+        id: 'favorites_2',
         name: 'Best Portraits',
         imageCount: 15,
         createdAt: '2024-01-10T14:20:00Z',

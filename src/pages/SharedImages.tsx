@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -7,7 +8,6 @@ import {
   Heart,
   Download,
   Eye,
-  Check,
   X,
   FolderPlus,
   Loader2,
@@ -51,14 +51,22 @@ function SharedImages() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showFavoritesModal, setShowFavoritesModal] = useState(false);
-  const [favoritesFolderName, setFavoritesFolderName] = useState('');
-  const [isCreatingFavorites, setIsCreatingFavorites] = useState(false);
+  const [favoritedItems, setFavoritedItems] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<{ id: string; message: string; type: 'success' | 'error' }[]>([]);
+  const [projectName, setProjectName] = useState<string>('default');
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
+  console.log('Decoded folder path:', decodedFolderPath);
+
+  useEffect(() => {
+    // Extract projectName from the URL path (last segment after projects/gallery/)
+    const pathSegments = decodedFolderPath.replace(/^\/+/, '').split('/');
+    const galleryIndex = pathSegments.indexOf('gallery');
+    const name = galleryIndex !== -1 && galleryIndex + 1 < pathSegments.length ? pathSegments[galleryIndex + 1] : decodedFolderPath.split('/').pop() || 'default';
+    setProjectName(name);
+    console.log('Calculated projectName from URL:', name);
+  }, [decodedFolderPath]);
 
   const fetchFolderItems = useCallback(async () => {
     setLoading(true);
@@ -72,8 +80,7 @@ function SharedImages() {
       if (prefix.startsWith('/')) {
         prefix = prefix.slice(1);
       }
-
-      console.log(`Fetching folders and images with prefix: '${prefix}'`);
+      console.log('Final fetch prefix:', prefix);
 
       // First fetch folders (non-recursive to get immediate subfolders)
       const foldersResponse = await fetch(
@@ -90,7 +97,7 @@ function SharedImages() {
       }
 
       const foldersData: ApiResponse = await foldersResponse.json();
-      console.log('Folders data:', foldersData);
+      console.log('Raw folders API response:', foldersData);
 
       // Map folders - handle case where folders array might be empty
       const mappedFolders: FolderItem[] = foldersData.folders ? foldersData.folders.map((folder: any) => ({
@@ -116,44 +123,58 @@ function SharedImages() {
       }
 
       const data: ApiResponse = await imagesResponse.json();
+      console.log('Raw images API response:', data);
 
       if (!data || !Array.isArray(data.files)) {
         throw new Error('Unexpected API response format');
       }
 
-      // Map all images from the folder and its subfolders
-      const mappedItems: GalleryItem[] = data.files.map((item: any) => {
-        const keyParts = item.key.split('/');
-        const rawTitle = keyParts.pop() || 'Untitled';
-        const title = rawTitle.replace(/\.[^/.]+$/, '');
-        let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
+      // Filter and map valid items
+      const invalidItems: any[] = [];
+      const mappedItems: GalleryItem[] = data.files
+        .map((item: any) => {
+          console.log('Processing item key:', item.key);
+          if (!item.key || item.key === null || item.key === undefined || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
+            invalidItems.push({ ...item, reason: 'Invalid key' });
+            return null;
+          }
+          const keyParts = item.key.split('/');
+          const rawTitle = keyParts.pop() || 'Untitled';
+          const title = rawTitle.replace(/\.[^/.]+$/, '');
+          let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
 
-        const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
-        if (dateMatch) {
-          eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-        }
+          const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
+          if (dateMatch) {
+            eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+          }
 
-        const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
+          const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
 
-        // Determine which subfolder this image belongs to
-        const folderPath = keyParts.join('/');
-        const subfolderName = folderPath.replace(prefix, '').split('/')[0] || 'Main Folder';
+          const folderPath = keyParts.join('/');
+          const subfolderName = folderPath.replace(prefix, '').split('/')[0] || 'Main Folder';
 
-        return {
-          id: item.key,
-          shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
-          eventDate,
-          imageUrl: item.presigned_url || item.url || 'https://picsum.photos/400/300',
-          title: `${subfolderName}: ${title}`,
-          uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
-          isWatermarked: false,
-          isPinProtected: false,
-          isFavorite: false,
-          key: item.key,
-          isVideo,
-        };
-      });
+          return {
+            id: item.key,
+            shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
+            eventDate,
+            imageUrl: item.presigned_url || item.url || 'https://picsum.photos/400/300',
+            title: `${subfolderName}: ${title}`,
+            uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
+            isWatermarked: false,
+            isPinProtected: false,
+            isFavorite: false,
+            key: item.key,
+            isVideo,
+          };
+        })
+        .filter((item): item is GalleryItem => item !== null);
 
+      console.log('Invalid items filtered out:', invalidItems);
+      console.log('Mapped items:', mappedItems);
+      if (mappedItems.length === 0) {
+        console.warn('No valid items found in API response. Check if images exist in the folder or if API response is malformed.');
+        addNotification('No valid images found in this folder.', 'error');
+      }
       setItems(mappedItems);
     } catch (err: any) {
       console.error('Error fetching folder items:', err);
@@ -167,84 +188,117 @@ function SharedImages() {
     fetchFolderItems();
   }, [fetchFolderItems]);
 
-  const handleItemSelect = (itemId: string) => {
-    setSelectedItems(prev => 
-      prev.includes(itemId) 
-        ? prev.filter(id => id !== itemId)
-        : [...prev, itemId]
-    );
+  const handleItemFavorite = async (itemId: string) => {
+    const isCurrentlyFavorited = favoritedItems.includes(itemId);
+    const newFavoritedItems = isCurrentlyFavorited
+      ? favoritedItems.filter(id => id !== itemId)
+      : [...favoritedItems, itemId];
+    setFavoritedItems(newFavoritedItems);
+
+    if (!isCurrentlyFavorited) {
+      const item = items.find(item => item.id === itemId);
+      if (!item) {
+        addNotification('Image not found', 'error');
+        return;
+      }
+
+      const imageKey = item.key;
+      console.log('Favoriting item with key:', { itemId, imageKey });
+      if (!imageKey || typeof imageKey !== 'string' || !imageKey.includes('/') || imageKey.trim() === '') {
+        console.error('Invalid image key for item:', { itemId, imageKey, item });
+        addNotification('Cannot favorite: Invalid image key', 'error');
+        setFavoritedItems(favoritedItems.filter(id => id !== itemId));
+        return;
+      }
+
+      try {
+        const folderName = 'client%20selection';
+        const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
+        const projectNameFromURL = projectName;
+
+        console.log('Copying image to client selection folder:', {
+          folderName,
+          imageKeys: [imageKey],
+          sourceFolder,
+          item,
+          projectName: projectNameFromURL,
+        });
+
+        const result = await createFavoritesFolderAPI({
+          folderName,
+          imageKeys: [imageKey],
+          sourceFolder,
+        });
+
+        if (result.success) {
+          addNotification(`Image added to "${projectNameFromURL}" folder under client selection`, 'success');
+          const clientSelectionPath = `projects/client%20selection/${projectNameFromURL}`;
+          navigate(`/shared-images/${encodeURIComponent(clientSelectionPath)}`);
+        } else {
+          throw new Error('Failed to add image to client selection folder');
+        }
+      } catch (err: any) {
+        console.error('Error adding image to client selection folder:', err);
+        addNotification(`Failed to add image to client selection: ${err.message}`, 'error');
+        setFavoritedItems(favoritedItems.filter(id => id !== itemId));
+      }
+    }
   };
 
-  const handleSelectAll = () => {
-    if (selectedItems.length === items.length) {
-      setSelectedItems([]);
+  const handleFavoriteAll = async () => {
+    if (favoritedItems.length === items.length) {
+      setFavoritedItems([]);
     } else {
-      setSelectedItems(items.map(item => item.id));
+      const newFavoritedItems = items.map(item => item.id);
+      setFavoritedItems(newFavoritedItems);
+
+      const imageKeys = items
+        .map(item => item.key)
+        .filter((key): key is string => !!key && typeof key === 'string' && key.includes('/') && key.trim() !== '');
+      
+      if (imageKeys.length === 0) {
+        console.error('No valid image keys found for favoriting all:', { items });
+        addNotification('No valid images to favorite', 'error');
+        setFavoritedItems([]);
+        return;
+      }
+
+      try {
+        const folderName = 'client%20selection';
+        const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
+        const projectNameFromURL = projectName;
+
+        console.log('Copying all images to client selection folder:', {
+          folderName,
+          imageKeys,
+          sourceFolder,
+          projectName: projectNameFromURL,
+        });
+
+        const result = await createFavoritesFolderAPI({
+          folderName,
+          imageKeys,
+          sourceFolder,
+        });
+
+        if (result.success) {
+          addNotification(`${imageKeys.length} images added to "${projectNameFromURL}" folder under client selection`, 'success');
+          const clientSelectionPath = `projects/client%20selection/${projectNameFromURL}`;
+          navigate(`/shared-images/${encodeURIComponent(clientSelectionPath)}`);
+        } else {
+          throw new Error('Failed to add images to client selection folder');
+        }
+      } catch (err: any) {
+        console.error('Error adding images to client selection folder:', err);
+        addNotification(`Failed to add images to client selection: ${err.message}`, 'error');
+        setFavoritedItems([]);
+      }
     }
   };
 
   const handleFolderClick = (folderPath: string) => {
     const encodedPath = encodeURIComponent(folderPath);
     navigate(`/shared-images/${encodedPath}`);
-  };
-
-  const handleCreateFavoritesFolder = async () => {
-    if (!favoritesFolderName.trim() || selectedItems.length === 0) {
-      addNotification('Please enter a folder name and select images', 'error');
-      return;
-    }
-
-    setIsCreatingFavorites(true);
-    
-    try {
-      // Create favorites folder using real API
-      console.log('Creating folder with data:', {
-        folderName: favoritesFolderName.trim(),
-        imageKeys: selectedItems,
-        sourceFolder: decodedFolderPath
-      });
-      
-      // Get the actual S3 keys for the selected items
-      const selectedImageKeys = items
-        .filter(item => selectedItems.includes(item.id))
-        .map(item => item.key || item.id); // Use key if available, fallback to id
-      
-      console.log('=== SELECTION DEBUG INFO ===');
-      console.log('All items:', items.map(item => ({ id: item.id, key: item.key, title: item.title, imageUrl: item.imageUrl })));
-      console.log('Selected item IDs:', selectedItems);
-      console.log('Selected image keys:', selectedImageKeys);
-      console.log('Selected items details:', items.filter(item => selectedItems.includes(item.id)));
-      console.log('Source folder:', decodedFolderPath);
-      console.log('=== END SELECTION DEBUG ===');
-      
-      const result = await createFavoritesFolderAPI({
-        folderName: favoritesFolderName.trim(),
-        imageKeys: selectedImageKeys,
-        sourceFolder: decodedFolderPath
-      });
-
-      if (result.success) {
-        addNotification(`New folder "${favoritesFolderName}" created successfully in parent directory! ${selectedImageKeys.length} images uploaded to the folder.`, 'success');
-        
-        // Reset state
-        setSelectedItems([]);
-        setFavoritesFolderName('');
-        setShowFavoritesModal(false);
-        
-        // Navigate back to gallery after successful creation
-        setTimeout(() => {
-          navigate('/gallery');
-        }, 2000);
-      } else {
-        throw new Error('Failed to create favorites folder');
-      }
-      
-    } catch (err: any) {
-      console.error('Error creating favorites folder:', err);
-      addNotification(`Failed to create folder and upload images: ${err.message}`, 'error');
-    } finally {
-      setIsCreatingFavorites(false);
-    }
   };
 
   const addNotification = (message: string, type: 'success' | 'error') => {
@@ -256,20 +310,19 @@ function SharedImages() {
   };
 
   const handleBackToGallery = () => {
-    navigate('/gallery');
+    window.history.back();
   };
 
   const handleDownloadSelected = async () => {
-    if (selectedItems.length === 0) {
-      addNotification('Please select images to download', 'error');
+    if (favoritedItems.length === 0) {
+      addNotification('Please favorite images to download', 'error');
       return;
     }
 
     try {
-      // Download logic for selected items
-      const selectedImages = items.filter(item => selectedItems.includes(item.id));
+      const favoritedImages = items.filter(item => favoritedItems.includes(item.id));
       
-      for (const image of selectedImages) {
+      for (const image of favoritedImages) {
         const link = document.createElement('a');
         link.href = image.imageUrl;
         link.download = image.title;
@@ -279,7 +332,7 @@ function SharedImages() {
         document.body.removeChild(link);
       }
       
-      addNotification(`Downloaded ${selectedImages.length} images`, 'success');
+      addNotification(`Downloaded ${favoritedImages.length} images`, 'success');
     } catch (err: any) {
       console.error('Error downloading images:', err);
       addNotification('Failed to download images', 'error');
@@ -303,13 +356,7 @@ function SharedImages() {
         <div className="text-center max-w-md mx-auto p-6">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Error Loading Folder</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={handleBackToGallery}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Back to Gallery
-          </button>
+          <p className="text-gray-500 mb-4">{error}</p>
         </div>
       </div>
     );
@@ -328,7 +375,7 @@ function SharedImages() {
                 className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
               >
                 <ArrowLeft className="h-5 w-5" />
-                <span>Back to Gallery</span>
+                <span>Back</span>
               </button>
               <div className="h-6 w-px bg-gray-300" />
               <h1 className="text-xl font-semibold text-gray-900">
@@ -367,20 +414,20 @@ function SharedImages() {
         </div>
       </div>
 
-      {/* Selection Bar */}
-      {selectedItems.length > 0 && (
+      {/* Favorites Bar */}
+      {favoritedItems.length > 0 && (
         <div className="bg-blue-50 border-b border-blue-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <span className="text-blue-800 font-medium">
-                  {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected
+                  {favoritedItems.length} favorite{favoritedItems.length !== 1 ? 's' : ''} selected
                 </span>
                 <button
-                  onClick={() => setSelectedItems([])}
+                  onClick={() => setFavoritedItems([])}
                   className="text-blue-600 hover:text-blue-800 transition-colors"
                 >
-                  Clear selection
+                  Clear favorites
                 </button>
               </div>
               <div className="flex items-center space-x-3">
@@ -392,11 +439,14 @@ function SharedImages() {
                   <span>Download</span>
                 </button>
                 <button
-                  onClick={() => setShowFavoritesModal(true)}
+                  onClick={() => {
+                    const clientSelectionPath = `projects/client%20selection/${projectName}`;
+                    navigate(`/shared-images/${encodeURIComponent(clientSelectionPath)}`);
+                  }}
                   className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
-                  <Heart className="h-4 w-4" />
-                  <span>Create New Folder</span>
+                  <FolderPlus className="h-4 w-4" />
+                  <span>View Client Selection</span>
                 </button>
               </div>
             </div>
@@ -410,7 +460,7 @@ function SharedImages() {
           <div className="flex items-center space-x-2 text-blue-800">
             <Heart className="h-5 w-5" />
             <p className="text-sm font-medium">
-              Select your favorite images from this folder and all its subfolders. Create a new folder in the parent directory and upload selected images to organize them.
+              Click the heart icon to mark images as favorites. They will be automatically copied to a "{projectName}" folder under "client selection" in the parent directory.
             </p>
           </div>
         </div>
@@ -418,16 +468,16 @@ function SharedImages() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Select All Bar */}
+        {/* Favorite All Bar */}
         {items.length > 0 && (
           <div className="mb-4 flex items-center justify-between">
             <button
-              onClick={handleSelectAll}
+              onClick={handleFavoriteAll}
               className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
-              <Check className="h-4 w-4" />
+              <Heart className="h-4 w-4" />
               <span>
-                {selectedItems.length === items.length ? 'Deselect All' : 'Select All'}
+                {favoritedItems.length === items.length ? 'Unfavorite All' : 'Favorite All'}
               </span>
             </button>
             <span className="text-sm text-gray-500">
@@ -436,7 +486,6 @@ function SharedImages() {
           </div>
         )}
 
-        {/* Items Grid/List */}
         {/* Folders Section */}
         {folders.length > 0 && (
           <div className="mb-8">
@@ -477,129 +526,71 @@ function SharedImages() {
             {folders.length > 0 && (
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Images</h2>
             )}
-          <div className={viewMode === 'grid' 
-            ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4'
-            : 'space-y-2'
-          }>
-            {items.map((item) => (
-              <div
-                key={item.id}
-                className={`relative group bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${
-                  selectedItems.includes(item.id) ? 'ring-2 ring-blue-500' : ''
-                }`}
-              >
-                {/* Selection Checkbox */}
-                <div className="absolute top-2 left-2 z-10">
-                  <button
-                    onClick={() => handleItemSelect(item.id)}
-                    className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
-                      selectedItems.includes(item.id)
-                        ? 'bg-blue-600 border-blue-600 text-white'
-                        : 'bg-white border-gray-300 hover:border-blue-400'
-                    }`}
-                  >
-                    {selectedItems.includes(item.id) && <Check className="h-3 w-3" />}
-                  </button>
-                </div>
+            <div className={viewMode === 'grid' 
+              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4'
+              : 'space-y-2'
+            }>
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className={`relative group bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${
+                    favoritedItems.includes(item.id) ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                >
+                  {/* Favorite Heart */}
+                  <div className="absolute top-2 left-2 z-10">
+                    <button
+                      onClick={() => handleItemFavorite(item.id)}
+                      className={`p-1 rounded-full transition-colors ${
+                        favoritedItems.includes(item.id) ? 'text-red-500' : 'text-gray-400 hover:text-red-400'
+                      }`}
+                    >
+                      <Heart className="h-5 w-5" fill={favoritedItems.includes(item.id) ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
 
-                {/* Image/Video */}
-                <div className="aspect-square relative cursor-pointer">
-                  {item.isVideo ? (
-                    <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                      <Play className="h-8 w-8 text-gray-400" />
-                    </div>
-                  ) : (
-                    <img
-                      src={item.imageUrl}
-                      alt={item.title}
-                      className="w-full h-full object-cover"
-                    />
-                  )}
-                  
-                  {/* Overlay */}
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex items-center justify-center">
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center space-x-2">
-                      <button className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors">
-                        <Eye className="h-4 w-4 text-gray-600" />
-                      </button>
-                      <button className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors">
-                        <Download className="h-4 w-4 text-gray-600" />
-                      </button>
+                  {/* Image/Video */}
+                  <div className="aspect-square relative cursor-pointer">
+                    {item.isVideo ? (
+                      <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                        <Play className="h-8 w-8 text-gray-400" />
+                      </div>
+                    ) : (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                    
+                    {/* Overlay */}
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center space-x-2">
+                        <button className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors">
+                          <Eye className="h-4 w-4 text-gray-600" />
+                        </button>
+                        <button className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors">
+                          <Download className="h-4 w-4 text-gray-600" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Item Info */}
-                <div className="p-3">
-                  <h3 className="text-sm font-medium text-gray-900 truncate">
-                    {item.title}
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {item.eventDate}
-                  </p>
+                  {/* Item Info */}
+                  <div className="p-3">
+                    <h3 className="text-sm font-medium text-gray-900 truncate">
+                      {item.title}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {item.eventDate}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
-
-      {/* Favorites Modal */}
-      {showFavoritesModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Create New Folder
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Create a new folder in the parent directory and upload {selectedItems.length} selected image{selectedItems.length !== 1 ? 's' : ''} to organize your favorites.
-              </p>
-              
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Folder Name
-                </label>
-                <input
-                  type="text"
-                  value={favoritesFolderName}
-                  onChange={(e) => setFavoritesFolderName(e.target.value)}
-                  placeholder="Enter folder name..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setShowFavoritesModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateFavoritesFolder}
-                  disabled={!favoritesFolderName.trim() || isCreatingFavorites}
-                  className={`px-6 py-2 rounded-lg font-semibold transition-colors ${
-                    favoritesFolderName.trim() && !isCreatingFavorites
-                      ? 'bg-green-600 text-white hover:bg-green-700'
-                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  {isCreatingFavorites ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
-                      Creating Folder & Uploading...
-                    </>
-                  ) : (
-                    'Create Folder & Upload Images'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Notifications */}
       <div className="fixed top-4 right-4 space-y-2 z-50">

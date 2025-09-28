@@ -1,0 +1,196 @@
+"""
+get_share Lambda with Wasabi direct keys (no env/config).
+ - Fetches files from Wasabi S3 (ap-northeast-1, bucket=arif12).
+ - Validates share token from DynamoDB (AWS eu-north-1).
+ - Returns either file list (JSON) or ZIP download.
+"""
+
+import json
+import logging
+import time
+import base64
+import hmac
+import hashlib
+import io
+import zipfile
+import traceback
+from typing import List, Dict, Any, Optional, Tuple
+
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+
+# ---------- FIXED CONFIG: hardcoded Wasabi + AWS ----------
+ACCESS_KEY = "OPV357W2ZD271BYQM2YK"
+SECRET_KEY = "GB35M7UWlOjefhcEjBCDlAWdtn43uiCiZdzrKoJJ"
+REGION = "ap-northeast-1"   # Wasabi region where your bucket lives
+BUCKET = "arif12"
+ENDPOINT_URL = f"https://s3.{REGION}.wasabisys.com"
+
+# DynamoDB (AWS region where your table exists)
+DDB_TABLE = "share_tokens"
+DDB_REGION = "eu-north-1"
+
+# Token signing key (must match sharelink Lambda)
+TOKEN_SIGNING_KEY = "please-change-this-secret"
+
+# Limits
+MAX_OBJECTS_TO_ZIP = 1000
+MAX_TOTAL_BYTES_TO_ZIP = 200 * 1024 * 1024  # 200 MB default
+DEBUG = True
+
+# ---------- Logging ----------
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# ---------- AWS Clients ----------
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
+    region_name=REGION,
+    endpoint_url=ENDPOINT_URL,
+)
+
+dynamodb = boto3.resource("dynamodb", region_name=DDB_REGION)
+ddb_client = boto3.client("dynamodb", region_name=DDB_REGION)
+
+# ---------- Helpers ----------
+def mask_val(s: Optional[str], head: int = 4, tail: int = 4):
+    if s is None:
+        return "<none>"
+    if s == "":
+        return "<empty>"
+    if len(s) <= head + tail + 2:
+        return s[0:head] + "*" * max(0, len(s)-head)
+    return f"{s[:head]}...{s[-tail:]} (len={len(s)})"
+
+def b64u_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+def b64u_decode(s: str) -> bytes:
+    s2 = s + "=" * ((4 - len(s) % 4) % 4)
+    return base64.urlsafe_b64decode(s2.encode("ascii"))
+
+def sign_payload(payload_bytes: bytes, key: str) -> str:
+    sig = hmac.new(key.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    return b64u_encode(sig)
+
+def verify_and_decode_token_debug(token: str) -> Tuple[bool, Optional[Dict[str, Any]], str, Dict[str, Any]]:
+    debug_info: Dict[str, Any] = {}
+    try:
+        if "." not in token:
+            return False, None, "invalid token format", debug_info
+
+        payload_b64, sig_b64 = token.split(".", 1)
+        debug_info["provided_sig_masked"] = mask_val(sig_b64, 6, 6)
+        expected_sig_b64 = sign_payload(b64u_decode(payload_b64), TOKEN_SIGNING_KEY)
+        debug_info["expected_sig_masked"] = mask_val(expected_sig_b64, 6, 6)
+
+        if not hmac.compare_digest(expected_sig_b64, sig_b64):
+            return False, None, "signature mismatch", debug_info
+
+        payload = json.loads(b64u_decode(payload_b64).decode("utf-8"))
+        now = int(time.time())
+        if now < int(payload.get("nbf", 0)): return False, None, "token not yet valid", debug_info
+        if now > int(payload.get("exp", 0)): return False, None, "token expired", debug_info
+        return True, payload, "ok", debug_info
+    except Exception as e:
+        return False, None, f"token decode error: {str(e)}", debug_info
+
+def load_token_from_ddb(token: str) -> Optional[Dict[str, Any]]:
+    table = dynamodb.Table(DDB_TABLE)
+    resp = table.get_item(Key={"token": token})
+    return resp.get("Item")
+
+def list_objects_under_prefix(prefix: str) -> List[Dict[str, Any]]:
+    prefix = prefix.lstrip("/")
+    items: List[Dict[str, Any]] = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix, PaginationConfig={"PageSize": 100}):
+        for o in page.get("Contents", []):
+            items.append({"Key": o["Key"], "Size": o.get("Size", 0)})
+            if len(items) >= MAX_OBJECTS_TO_ZIP:
+                return items
+    return items
+
+def create_zip_bytes(objects: List[Dict[str, Any]]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for o in objects:
+            key = o["Key"]
+            try:
+                resp = s3.get_object(Bucket=BUCKET, Key=key)
+                content = resp["Body"].read()
+                arcname = key.split("/", 1)[-1]
+                zf.writestr(arcname, content)
+            except Exception as e:
+                logger.error(f"Error fetching {key}: {e}")
+    buf.seek(0)
+    return buf.read()
+
+def json_resp(code: int, payload: Dict[str, Any]):
+    return {
+        "statusCode": code,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+        },
+        "body": json.dumps(payload)
+    }
+
+def bin_resp(code: int, binary_bytes: bytes, filename: str):
+    return {
+        "statusCode": code,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/zip",
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+        "isBase64Encoded": True,
+        "body": base64.b64encode(binary_bytes).decode("ascii")
+    }
+
+# ---------- Lambda Handler ----------
+def lambda_handler(event, context):
+    try:
+        qs = event.get("queryStringParameters") or {}
+        token = qs.get("token")
+        if not token:
+            return json_resp(400, {"success": False, "message": "token required"})
+
+        ok, payload, msg, sig_debug = verify_and_decode_token_debug(token)
+        if not ok:
+            return json_resp(400, {"success": False, "message": msg, "debug": sig_debug})
+
+        ddb_item = load_token_from_ddb(token)
+        if not ddb_item:
+            return json_resp(404, {"success": False, "message": "token not found"})
+
+        prefixes = payload.get("prefixes") or ddb_item.get("prefixes") or []
+        if not prefixes:
+            return json_resp(400, {"success": False, "message": "no prefixes in token"})
+
+        all_objects = []
+        for p in prefixes:
+            if p.endswith("/"):
+                all_objects.extend(list_objects_under_prefix(p))
+            else:
+                try:
+                    head = s3.head_object(Bucket=BUCKET, Key=p)
+                    all_objects.append({"Key": p, "Size": head.get("ContentLength", 0)})
+                except ClientError:
+                    continue
+
+        if not all_objects:
+            return json_resp(404, {"success": False, "message": "No objects found"})
+
+        if qs.get("list_only", "false").lower() == "true":
+            return json_resp(200, {"success": True, "objects": all_objects})
+
+        zip_bytes = create_zip_bytes(all_objects)
+        fname = f"{prefixes[0].rstrip('/').split('/')[-1]}_{int(time.time())}.zip"
+        return bin_resp(200, zip_bytes, fname)
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        return json_resp(500, {"success": False, "message": "Server error", "error": str(e), "traceback": tb})

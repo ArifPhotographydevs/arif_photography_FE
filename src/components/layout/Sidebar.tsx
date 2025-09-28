@@ -4,7 +4,7 @@ import {
   Camera, 
   Users, 
   Calendar, 
-  Settings, 
+ 
   TrendingUp, 
   DollarSign, 
   FileText, 
@@ -36,7 +36,7 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: 'Team', icon: Users, path: '/team' },
     // { name: 'Analytics', icon: BarChart3, path: '/analytics' },
     // { name: 'Activity Logs', icon: Activity, path: '/activity-logs' },
-    { name: 'Settings', icon: Settings, path: '/settings' },
+    // { name: 'Settings', icon: Settings, path: '/settings' },
   ];
 
   const isActive = (path: string) => {
