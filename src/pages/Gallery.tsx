@@ -132,6 +132,8 @@ function Gallery() {
   const [shareModal, setShareModal] = useState<{ isOpen: boolean; links: string[]; serverMessage?: string | null }>({ isOpen: false, links: [], serverMessage: null });
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [imageListModal, setImageListModal] = useState<{ isOpen: boolean; folderName: string; images: string[] }>({ isOpen: false, folderName: '', images: [] });
+  const [selectedImagesModal, setSelectedImagesModal] = useState<{ isOpen: boolean; images: string[] }>({ isOpen: false, images: [] });
   const [filters, setFilters] = useState({
     month: '',
     shootType: '',
@@ -752,6 +754,20 @@ const handleShareSingle = async (item: GalleryItem) => {
     setSelectedItems(allIds);
   };
 
+  const handleSelectAllImages = () => {
+    const allImageIds = filteredImages.map((item) => item.id);
+    setSelectedItems(allImageIds);
+  };
+
+  const handleCopyAllImageNames = () => {
+    const allImageNames = filteredImages.map(item => item.title);
+    if (allImageNames.length === 0) {
+      addNotification('No images found to copy', 'info');
+      return;
+    }
+    copyImageListToClipboard(allImageNames);
+  };
+
   const handleClearSelection = () => {
     setSelectedItems([]);
   };
@@ -879,6 +895,101 @@ const handleShareSingle = async (item: GalleryItem) => {
     setItems((prev) =>
       prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !i.isFavorite } : i))
     );
+  };
+
+  // Handle showing image list for client selection folders
+  const handleShowImageList = async (folderPath: string, folderName: string) => {
+    try {
+      // Check if this is a client selection folder
+      if (!folderPath.includes('client') && !folderPath.includes('selection')) {
+        addNotification('This feature is only available for client selection folders', 'info');
+        return;
+      }
+
+      addNotification('Loading image list...', 'info');
+      
+      let prefix = folderPath;
+      if (prefix.startsWith('/')) prefix = prefix.slice(1);
+      if (!prefix.endsWith('/')) prefix += '/';
+
+      const response = await fetch(
+        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch folder contents: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data || !Array.isArray(data.files)) {
+        throw new Error('Unexpected API response format');
+      }
+
+      // Extract image names from the files
+      const imageNames = data.files
+        .filter((file: any) => file.key && typeof file.key === 'string')
+        .map((file: any) => {
+          const keyParts = file.key.split('/');
+          return keyParts.pop() || 'Untitled';
+        })
+        .filter((name: string) => name !== 'Untitled');
+
+      setImageListModal({
+        isOpen: true,
+        folderName: folderName,
+        images: imageNames
+      });
+
+    } catch (err: any) {
+      console.error('Error fetching image list:', err);
+      addNotification(`Failed to load image list: ${err.message}`, 'error');
+    }
+  };
+
+  // Copy image list to clipboard
+  const copyImageListToClipboard = async (images: string[]) => {
+    try {
+      const imageList = images.join('\n');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(imageList);
+        addNotification('Image list copied to clipboard', 'success');
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = imageList;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        addNotification('Image list copied to clipboard', 'success');
+      }
+    } catch (err: any) {
+      console.error('Copy failed:', err);
+      addNotification('Failed to copy image list', 'error');
+    }
+  };
+
+  // Handle showing selected images list
+  const handleShowSelectedImages = () => {
+    // Filter selected items to get only image items (not folders)
+    const selectedImageIds = selectedItems.filter(id => !id.startsWith('/'));
+    const selectedImages = items.filter(item => selectedImageIds.includes(item.id));
+    
+    if (selectedImages.length === 0) {
+      addNotification('No images selected', 'info');
+      return;
+    }
+
+    const imageNames = selectedImages.map(item => item.title);
+    setSelectedImagesModal({
+      isOpen: true,
+      images: imageNames
+    });
   };
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement | HTMLVideoElement>) => {
@@ -1242,13 +1353,78 @@ const handleShareSingle = async (item: GalleryItem) => {
                   >
                     {sortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
                   </button>
+
+                  {/* Select All Button */}
+                  {(filteredImages.length > 0 || folders.length > 0) && (
+                    <button
+                      onClick={handleSelectAll}
+                      className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedItems.length === (filteredImages.length + folders.length)}
+                        onChange={() => {}} // Controlled by button click
+                        className="h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded mr-2"
+                      />
+                      Select All
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center space-x-3">
+                  {/* Quick Actions for Images */}
+                  {filteredImages.length > 0 && (
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={handleSelectAllImages}
+                        className="flex items-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors duration-200 text-sm"
+                      >
+                        <Image className="w-4 h-4 mr-1" />
+                        Select All Images
+                      </button>
+                      <button
+                        onClick={handleCopyAllImageNames}
+                        className="flex items-center px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors duration-200 text-sm"
+                      >
+                        <Copy className="w-4 h-4 mr-1" />
+                        Copy All Names
+                      </button>
+                    </div>
+                  )}
+                  
                   {/* Selection Info */}
                   {selectedItems.length > 0 && (
                     <div className="flex items-center space-x-2">
                       <span className="text-sm text-gray-600">{selectedItems.length} selected</span>
+                      
+                      {/* Show Image List button for client selection folders */}
+                      {selectedItems.length === 1 && 
+                       folders.some(f => f.path === selectedItems[0] && (f.path.includes('client') || f.path.includes('selection'))) && (
+                        <button
+                          onClick={() => {
+                            const selectedFolder = folders.find(f => f.path === selectedItems[0]);
+                            if (selectedFolder) {
+                              handleShowImageList(selectedFolder.path, selectedFolder.name);
+                            }
+                          }}
+                          className="flex items-center px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm"
+                        >
+                          <Eye className="w-4 h-4 inline mr-1" />
+                          View Image List
+                        </button>
+                      )}
+                      
+                      {/* Show Selected Images button when multiple images are selected */}
+                      {selectedItems.filter(id => !id.startsWith('/')).length > 0 && (
+                        <button
+                          onClick={handleShowSelectedImages}
+                          className="flex items-center px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm"
+                        >
+                          <Image className="w-4 h-4 inline mr-1" />
+                          View Selected Images
+                        </button>
+                      )}
+                      
                       <button
                         onClick={handleBulkDownload}
                         className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 text-sm"
@@ -1740,6 +1916,172 @@ const handleShareSingle = async (item: GalleryItem) => {
                     className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
                   >
                     Create
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Image List Modal */}
+          {imageListModal.isOpen && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-[#2D2D2D]">
+                    Images in "{imageListModal.folderName}"
+                  </h3>
+                  <button
+                    onClick={() => setImageListModal({ isOpen: false, folderName: '', images: [] })}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-sm text-gray-600">
+                    {imageListModal.images.length} image{imageListModal.images.length !== 1 ? 's' : ''} found
+                  </p>
+                  <button
+                    onClick={() => copyImageListToClipboard(imageListModal.images)}
+                    className="flex items-center px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 text-sm"
+                  >
+                    <Copy className="w-4 h-4 mr-1" />
+                    Copy List
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
+                  {imageListModal.images.length === 0 ? (
+                    <div className="flex items-center justify-center h-32 text-gray-500">
+                      <div className="text-center">
+                        <Image className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                        <p>No images found in this folder</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4">
+                      <div className="space-y-2">
+                        {imageListModal.images.map((imageName, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-2 bg-gray-50 rounded border hover:bg-gray-100 transition-colors duration-200"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <Image className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm font-medium text-gray-700">
+                                {imageName}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => copyToClipboard(imageName)}
+                              className="p-1 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                              title="Copy image name"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-2 mt-4">
+                  <button
+                    onClick={() => setImageListModal({ isOpen: false, folderName: '', images: [] })}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => copyImageListToClipboard(imageListModal.images)}
+                    className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
+                  >
+                    Copy All Names
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Selected Images Modal */}
+          {selectedImagesModal.isOpen && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-[#2D2D2D]">
+                    Selected Images
+                  </h3>
+                  <button
+                    onClick={() => setSelectedImagesModal({ isOpen: false, images: [] })}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-sm text-gray-600">
+                    {selectedImagesModal.images.length} image{selectedImagesModal.images.length !== 1 ? 's' : ''} selected
+                  </p>
+                  <button
+                    onClick={() => copyImageListToClipboard(selectedImagesModal.images)}
+                    className="flex items-center px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm"
+                  >
+                    <Copy className="w-4 h-4 mr-1" />
+                    Copy List
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
+                  {selectedImagesModal.images.length === 0 ? (
+                    <div className="flex items-center justify-center h-32 text-gray-500">
+                      <div className="text-center">
+                        <Image className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                        <p>No images selected</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4">
+                      <div className="space-y-2">
+                        {selectedImagesModal.images.map((imageName, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-2 bg-gray-50 rounded border hover:bg-gray-100 transition-colors duration-200"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <Image className="h-4 w-4 text-purple-500" />
+                              <span className="text-sm font-medium text-gray-700">
+                                {imageName}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => copyToClipboard(imageName)}
+                              className="p-1 text-gray-400 hover:text-purple-600 transition-colors duration-200"
+                              title="Copy image name"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-2 mt-4">
+                  <button
+                    onClick={() => setSelectedImagesModal({ isOpen: false, images: [] })}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => copyImageListToClipboard(selectedImagesModal.images)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                  >
+                    Copy All Names
                   </button>
                 </div>
               </div>
