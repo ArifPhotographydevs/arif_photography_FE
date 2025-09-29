@@ -635,30 +635,47 @@ function ProposalView() {
               Payment Schedule
             </h2>
             <p className="text-gray-700 text-lg mb-8">
-              Our comprehensive wedding photography package is priced at Rs.{calculateTotal().toLocaleString()}, inclusive of all services mentioned above. We propose the following payment schedule:
+              Our comprehensive wedding photography package is priced at ₹{calculateTotal().toLocaleString()}, inclusive of all services mentioned above. We propose the following payment schedule:
             </p>
 
-            <div className="space-y-4">
-              <div className="bg-gray-600 text-white p-6 rounded-lg flex justify-between">
-                <span className="font-bold">Subtotal</span>
-                <span>₹ {calculateSubtotal().toLocaleString()}</span>
-              </div>
-
-              {proposal.gstEnabled && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex justify-between">
-                  <span className="font-bold">GST (18%)</span>
-                  <span>₹ {(calculateSubtotal() * 0.18).toLocaleString()}</span>
+            <div className="space-y-6">
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-4">Advance Payment</h3>
+                <p className="text-gray-700 mb-4">40% of the total billing value to be paid as an advance to block the dates.</p>
+                <div className="bg-gray-600 text-white p-4 rounded-lg">
+                  <span className="font-bold">Advance Amount: ₹{Math.round(calculateTotal() * 0.4).toLocaleString()}</span>
                 </div>
-              )}
-
-              <div className="bg-gray-800 text-white p-6 rounded-lg flex justify-between">
-                <span className="font-bold">Total</span>
-                <span>₹ {calculateTotal().toLocaleString()}</span>
               </div>
 
-              {/* Example: show a suggested payment split if desired */}
-              <div className="bg-gray-100 p-4 rounded-lg">
-                <p className="text-gray-700">Suggested payment schedule: 30% advance to confirm booking, 40% before event day, 30% on delivery of final deliverables.</p>
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-4">Delivery Payment</h3>
+                <p className="text-gray-700 mb-4">50% payment before the wedding Day, Remaining 5% at the Delivery Time and final 5% after the Album finalization.</p>
+                <div className="space-y-2">
+                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
+                    <span>Before Wedding Day (50%):</span>
+                    <span>₹{Math.round(calculateTotal() * 0.5).toLocaleString()}</span>
+                  </div>
+                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
+                    <span>At Delivery Time (5%):</span>
+                    <span>₹{Math.round(calculateTotal() * 0.05).toLocaleString()}</span>
+                  </div>
+                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
+                    <span>After Album Finalization (5%):</span>
+                    <span>₹{Math.round(calculateTotal() * 0.05).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <h4 className="text-lg font-bold text-red-800 mb-2">NOTE:</h4>
+                <p className="text-red-700">We will strictly deliver the data only after receiving 95% of the total amount.</p>
+              </div>
+
+              <div className="bg-gray-800 text-white p-6 rounded-lg">
+                <div className="flex justify-between text-xl font-bold">
+                  <span>Total Package Price:</span>
+                  <span>₹{calculateTotal().toLocaleString()}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -687,25 +704,69 @@ function ProposalView() {
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Event Timings</h3>
                 <p className="text-gray-700">Apart from Wedding any event is considered as 4-5 hours for additional coverage need to discuss for adding slot</p>
               </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Data Safety</h3>
+                <p className="text-gray-700">For Clients who don't collect deliverables within 60 days, we will not hold responsibility for the Data loss.</p>
+              </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Hard Drives</h3>
+                <p className="text-gray-700">A Hard Disk must be provided by the clients.(2 Harddisks has to be provided to the Management Team)</p>
+              </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Outfits – Best Choices</h3>
+                <p className="text-gray-700 mb-2">Clients are advised to prepare 1/2 outfits for the session. (Optional: 3rd outfit based on photography & client requirements.)</p>
+                <p className="text-gray-600 text-sm italic">Note: Excessive outfit changes or travel during the shoot may affect the flow and quality of photos. We aim to capture natural, professional moments without interruption.</p>
+              </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Shoot Details – Locations</h3>
+                <p className="text-gray-700 mb-3">Clients are responsible for securing access to chosen shoot locations. We are not liable for any closures or restrictions at the selected venues.</p>
+                <div className="bg-gray-50 p-4 rounded">
+                  <h4 className="font-semibold text-gray-900 mb-2">Pre-Wedding Shoot Duration</h4>
+                  <ul className="list-disc list-inside text-gray-700 space-y-1">
+                    <li>Local shoots: 1-day shoot</li>
+                    <li>Outstation shoots: 2–3 days (includes travel & shoot time)</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Call Management</h3>
+                <p className="text-gray-700">In case we are unable to attend your call during client meetings or internal discussions, please feel free to drop us a message on WhatsApp. Our contact team will get back to you as soon as possible.</p>
+              </div>
+
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Shoot Timings & Waiting Policy</h3>
+                <p className="text-gray-700">Clients are requested to arrive at the scheduled shoot time. Waiting time: 15–30 minutes grace period. After 30 minutes, waiting charges will be applicable and added to the final bill.</p>
+              </div>
             </div>
           </div>
 
           {/* Video & Album Corrections Section */}
           <div className="mb-16">
-            <div className="bg-gray-100 p-6 rounded-lg mb-6">
-              <h3 className="text-xl font-bold text-gray-900 mb-3">Video & Album Corrections:</h3>
-              <p className="text-gray-700">
-                Clients must request any corrections or changes within 1 week of receiving the final video or album draft. After this period, we will not be responsible for delayed correction requests, and additional charges will apply for any revisions made beyond the 1-week window.
-              </p>
-            </div>
+            <h2 className="text-4xl font-bold text-gray-900 mb-6 text-left" style={{ fontFamily: 'serif' }}>
+              Additional Terms & Policies
+            </h2>
+            
+            <div className="space-y-6">
+              <div className="bg-gray-100 p-6 rounded-lg">
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Video & Album Corrections</h3>
+                <p className="text-gray-700">
+                  Clients must request any corrections or changes within 1 week of receiving the final video or album draft. After this period, we will not be responsible for delayed correction requests, and additional charges will apply for any revisions made beyond the 1-week window.
+                </p>
+              </div>
 
-            <div className="bg-gray-100 p-6 rounded-lg mb-8">
-              <h3 className="text-xl font-bold text-gray-900 mb-3">Note:</h3>
-              <p className="text-gray-700">We will Strictly adhere to providing only the Requirements listed above, without adding or including any additional elements beyond those specified.</p>
+              <div className="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
+                <h3 className="text-xl font-bold text-yellow-800 mb-3">Important Note</h3>
+                <p className="text-yellow-700">We will Strictly adhere to providing only the Requirements listed above, without adding or including any additional elements beyond those specified.</p>
+              </div>
             </div>
 
             {/* Decorative Divider */}
-            <div className="flex items-center justify-center mb-8">
+            <div className="flex items-center justify-center my-12">
               <div className="w-4 h-4 bg-gray-400 rounded-full"></div>
               <div className="w-8 h-0.5 bg-gray-400 mx-2"></div>
               <div className="w-6 h-6 border-2 border-gray-400 transform rotate-45"></div>
