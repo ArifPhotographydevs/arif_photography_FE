@@ -24,12 +24,12 @@ import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
 
 // --- TYPE DEFINITIONS ---
-interface Service {
+interface Event {
   id: string;
   title: string;
+  date: string;
+  time: string;
   description: string;
-  quantity: number;
-  unitPrice: number;
 }
 
 interface AddOn {
@@ -46,7 +46,7 @@ interface ProposalData {
   eventDate: string;
   venue: string;
   notes: string;
-  services: Service[];
+  events: Event[];
   addOns: AddOn[];
   gstEnabled: boolean;
   logo: File | null;
@@ -74,8 +74,8 @@ function ProposalCreate() {
     eventDate: '',
     venue: '',
     notes: '',
-    services: [
-      { id: '1', title: 'Wedding Photography', description: 'Full day wedding coverage', quantity: 1, unitPrice: 50000 }
+    events: [
+      { id: '1', title: 'Wedding Photography', date: '', time: '', description: 'Full day wedding coverage' }
     ],
     addOns: [
       { id: '1', name: 'Drone Photography', price: 15000, selected: false },
@@ -155,6 +155,7 @@ function ProposalCreate() {
     { value: 'standard', label: 'Standard Wedding Terms' },
     { value: 'premium', label: 'Premium Package Terms' },
     { value: 'corporate', label: 'Corporate Event Terms' },
+    { value: 'wedding_photography', label: 'Wedding Photography Complete Terms' },
     { value: 'custom', label: 'Custom Terms' }
   ];
 
@@ -162,28 +163,28 @@ function ProposalCreate() {
   const handleInputChange = (field: keyof ProposalData, value: any) => {
     setProposalData(prev => ({ ...prev, [field]: value }));
   };
-  const handleServiceChange = (serviceId: string, field: keyof Service, value: any) => {
+  const handleEventChange = (eventId: string, field: keyof Event, value: any) => {
     setProposalData(prev => ({
       ...prev,
-      services: prev.services.map(service =>
-        service.id === serviceId ? { ...service, [field]: value } : service
+      events: prev.events.map(event =>
+        event.id === eventId ? { ...event, [field]: value } : event
       )
     }));
   };
-  const addService = () => {
-    const newService: Service = {
+  const addEvent = () => {
+    const newEvent: Event = {
       id: Date.now().toString(),
       title: '',
-      description: '',
-      quantity: 1,
-      unitPrice: 0
+      date: '',
+      time: '',
+      description: ''
     };
-    setProposalData(prev => ({ ...prev, services: [...prev.services, newService] }));
+    setProposalData(prev => ({ ...prev, events: [...prev.events, newEvent] }));
   };
-  const removeService = (serviceId: string) => {
+  const removeEvent = (eventId: string) => {
     setProposalData(prev => ({
       ...prev,
-      services: prev.services.filter(service => service.id !== serviceId)
+      events: prev.events.filter(event => event.id !== eventId)
     }));
   };
   const toggleAddOn = (addOnId: string) => {
@@ -204,8 +205,8 @@ function ProposalCreate() {
     }
   };
   const calculateSubtotal = () => {
-    const servicesTotal = proposalData.services.reduce((total, service) => total + (service.quantity * service.unitPrice), 0);
-    return servicesTotal;
+    const addOnsTotal = proposalData.addOns.filter(addOn => addOn.selected).reduce((total, addOn) => total + addOn.price, 0);
+    return addOnsTotal;
   };
   const calculateTotal = () => {
     const subtotal = calculateSubtotal();
@@ -298,7 +299,7 @@ function ProposalCreate() {
   const isStepValid = (step: number) => {
     switch (step) {
       case 1: return true;
-      case 2: return proposalData.services.every(s => s.title && s.unitPrice > 0);
+      case 2: return proposalData.events.every(e => e.title);
       case 3: return proposalData.termsTemplate !== '';
       default: return true;
     }
@@ -413,21 +414,21 @@ function ProposalCreate() {
                 </div>
               )}
 
-              {/* --- STEP 2: Package Builder --- */}
+              {/* --- STEP 2: Events Builder --- */}
               {currentStep === 2 && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Build Your Package</h2>
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between"><h3 className="text-lg font-medium text-[#2D2D2D]">Services</h3><button onClick={addService} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200"><Plus className="h-4 w-4 mr-2" />Add Service</button></div>
-                    {proposalData.services.map((service, index) => (
-                      <div key={service.id} className="bg-gray-50 rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between"><h4 className="font-medium text-[#2D2D2D]">Service {index + 1}</h4>{proposalData.services.length > 1 && <button onClick={() => removeService(service.id)} className="text-red-500 hover:text-red-700 transition-colors duration-200"><Trash2 className="h-4 w-4" /></button>}</div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Title *</label><input type="text" value={service.title} onChange={(e) => handleServiceChange(service.id, 'title', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200" placeholder="Service title"/></div>
-                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Description</label><input type="text" value={service.description} onChange={(e) => handleServiceChange(service.id, 'description', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200" placeholder="Service description"/></div>
-                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Quantity</label><input type="number" min="1" value={service.quantity} onChange={(e) => handleServiceChange(service.id, 'quantity', parseInt(e.target.value) || 1)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"/></div>
-                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Unit Price (₹) *</label><div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><DollarSign className="h-4 w-4 text-gray-400" /></div><input type="number" min="0" value={service.unitPrice} onChange={(e) => handleServiceChange(service.id, 'unitPrice', parseInt(e.target.value) || 0)} className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200" placeholder="0"/></div></div>
+                    <div className="flex items-center justify-between"><h3 className="text-lg font-medium text-[#2D2D2D]">Events</h3><button onClick={addEvent} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200"><Plus className="h-4 w-4 mr-2" />Add Event</button></div>
+                    {proposalData.events.map((event, index) => (
+                      <div key={event.id} className="bg-gray-50 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between"><h4 className="font-medium text-[#2D2D2D]">Event {index + 1}</h4>{proposalData.events.length > 1 && <button onClick={() => removeEvent(event.id)} className="text-red-500 hover:text-red-700 transition-colors duration-200"><Trash2 className="h-4 w-4" /></button>}</div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Event Title *</label><input type="text" value={event.title} onChange={(e) => handleEventChange(event.id, 'title', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200" placeholder="Event title"/></div>
+                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Date</label><input type="date" value={event.date} onChange={(e) => handleEventChange(event.id, 'date', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"/></div>
+                          <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Time</label><input type="time" value={event.time} onChange={(e) => handleEventChange(event.id, 'time', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200"/></div>
                         </div>
+                        <div><label className="block text-sm font-medium text-[#2D2D2D] mb-1">Description</label><textarea value={event.description} onChange={(e) => handleEventChange(event.id, 'description', e.target.value)} rows={2} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-[#00BCEB] transition-all duration-200 resize-none" placeholder="Event description"/></div>
                       </div>
                     ))}
                   </div>
@@ -476,9 +477,17 @@ function ProposalCreate() {
                     <div className="bg-white p-6 rounded-lg shadow-sm">
                       <div className="flex items-center justify-between mb-6">{logoPreview && <img src={logoPreview} alt="Logo" className="h-12 w-auto"/>}<div className="text-right"><h1 className="text-2xl font-bold text-[#2D2D2D]">PROPOSAL</h1><p className="text-gray-600">#{Date.now().toString().slice(-6)}</p></div></div>
                       <div className="mb-6"><h3 className="text-lg font-semibold text-[#2D2D2D] mb-2">Client Details</h3><p className="text-[#2D2D2D]">{proposalData.clientName}</p><p className="text-gray-600">{proposalData.shootType}</p><p className="text-gray-600">{new Date(proposalData.eventDate).toLocaleDateString()}</p>{proposalData.venue && <p className="text-gray-600">{proposalData.venue}</p>}</div>
-                      <div className="mb-6"><h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Services</h3><div className="space-y-2">{proposalData.services.map((service) => (<div key={service.id} className="flex justify-between"><div><p className="font-medium text-[#2D2D2D]">{service.title}</p><p className="text-sm text-gray-600">{service.description}</p><p className="text-sm text-gray-600">Qty: {service.quantity}</p></div><p className="font-medium text-[#2D2D2D]">₹{(service.quantity * service.unitPrice).toLocaleString()}</p></div>))}</div></div>
+                      <div className="mb-6"><h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Events</h3><div className="space-y-2">{proposalData.events.map((event) => (<div key={event.id}><div><p className="font-medium text-[#2D2D2D]">{event.title}</p><p className="text-sm text-gray-600">{event.description}</p>{event.date && <p className="text-sm text-gray-600">Date: {new Date(event.date).toLocaleDateString()}</p>}{event.time && <p className="text-sm text-gray-600">Time: {event.time}</p>}</div></div>))}</div></div>
                       {proposalData.addOns.some(addOn => addOn.selected) && <div className="mb-6"><h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Add-ons</h3><div className="space-y-2">{proposalData.addOns.filter(addOn => addOn.selected).map((addOn) => (<div key={addOn.id} className="flex justify-between"><p className="text-[#2D2D2D]">{addOn.name}</p><p className="font-medium text-[#2D2D2D]">₹{addOn.price.toLocaleString()}</p></div>))}</div></div>}
                       <div className="border-t pt-4"><div className="flex justify-between mb-2"><span className="text-[#2D2D2D]">Subtotal:</span><span className="text-[#2D2D2D]">₹{calculateSubtotal().toLocaleString()}</span></div>{proposalData.gstEnabled && <div className="flex justify-between mb-2"><span className="text-[#2D2D2D]">GST (18%):</span><span className="text-[#2D2D2D]">₹{(calculateSubtotal() * 0.18).toLocaleString()}</span></div>}<div className="flex justify-between text-xl font-bold text-[#2D2D2D] pt-2 border-t"><span>Total:</span><span>₹{calculateTotal().toLocaleString()}</span></div></div>
+                      {proposalData.termsTemplate && (
+                        <div className="mt-6 pt-4 border-t">
+                          <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4">Terms & Conditions</h3>
+                          <div className="text-sm text-gray-600 whitespace-pre-line bg-gray-50 p-4 rounded-lg max-h-64 overflow-y-auto">
+                            {getTermsContent(proposalData.termsTemplate)}
+                          </div>
+                        </div>
+                      )}
                       {proposalData.footerNote && <div className="mt-6 pt-4 border-t"><p className="text-sm text-gray-600">{proposalData.footerNote}</p></div>}
                     </div>
                   </div>
