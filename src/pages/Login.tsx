@@ -278,18 +278,7 @@ function Login() {
           </form>
 
           {/* Sign Up Link */}
-          <div className="mt-8 text-center">
-            <p className="text-[#2D2D2D]">
-              Don't have an account?{' '}
-              <button
-                type="button"
-                onClick={handleSignupClick}
-                className="text-[#FF6B00] hover:text-[#e55a00] font-medium transition-colors duration-200"
-              >
-                Sign Up
-              </button>
-            </p>
-          </div>
+          
         </div>
       </div>
 

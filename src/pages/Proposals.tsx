@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
+import { v4 as uuidv4 } from 'uuid'; // npm install uuid
 import { 
   Plus, 
   Search, 
@@ -26,6 +27,7 @@ import {
 const GET_ALL_URL = 'https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData';
 const UPDATE_STATUS_URL = 'https://e419qsiwvk.execute-api.eu-north-1.amazonaws.com/updateproposalStatus';
 
+const newLeadId = uuidv4();
 type BackendHistory = { note: string; at: string };
 
 interface Proposal {
@@ -177,7 +179,7 @@ function Proposals() {
   }, [proposals, searchTerm, filters]);
 
   const handleViewProposal = (proposalId: string) => window.open(`/proposals/view/${proposalId}`, '_blank');
-  const handleViewLead = (leadId: string) => { window.location.href = `/leads/${leadId}`; };
+  const handleViewLead = (proposalId: string) => { window.location.href = `/proposals/create/${proposalId}`; };
   const handleEditProposal = (proposalId: string) => { window.location.href = `/proposals/edit/${proposalId}`; };
   const handleDuplicateProposal = (proposalId: string) => { console.log('Duplicating proposal:', proposalId); };
 
@@ -273,13 +275,21 @@ function Proposals() {
               <h2 className="text-2xl font-bold text-[#2D2D2D]">Proposals Management</h2>
               <p className="text-gray-600 mt-1">Track and manage all your photography proposals</p>
             </div>
-            {/* <button
-              onClick={() => (window.location.href = '/proposals/create')}
-              className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Create Proposal
-            </button> */}
+            
+
+<button
+  onClick={() => {
+    // ✅ Generate a UUID
+    
+    // ✅ Navigate with the UUID in the URL
+    window.location.href = `/proposals/create/${newLeadId}`;
+  }}
+  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+>
+  <Plus className="h-4 w-4 mr-2" />
+  Create Proposal
+</button>
+
           </div>
 
           {/* Stats */}
@@ -442,7 +452,7 @@ function Proposals() {
                                   className="text-xs text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200 flex items-center mt-1"
                                 >
                                   <ExternalLink className="h-3 w-3 mr-1" />
-                                  View Lead
+                                  View Proposal
                                 </button>
                               </div>
                             </div>
@@ -639,6 +649,7 @@ function Proposals() {
                       </div>
                     </>
                   )}
+                  
 
                   <div className="flex items-center justify-between mt-4">
                     <button

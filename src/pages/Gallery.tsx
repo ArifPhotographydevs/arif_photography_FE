@@ -522,43 +522,43 @@ function Gallery() {
    * For folders: calls server to presign objects under prefixes.
    * Returns string[] of links.
    */
-  const generateShareableLinks = async (forItemIds: string[]) => {
-    const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
-    const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
-    const links: string[] = [];
+  // const generateShareableLinks = async (forItemIds: string[]) => {
+  //   const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
+  //   const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
+  //   const links: string[] = [];
 
-    // Items that already have direct URLs
-    if (itemIds.length > 0) {
-      const itemsToShare = items.filter((it) => itemIds.includes(it.id));
-      const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
-      const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
+  //   // Items that already have direct URLs
+  //   if (itemIds.length > 0) {
+  //     const itemsToShare = items.filter((it) => itemIds.includes(it.id));
+  //     const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
+  //     const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
 
-      if (directUrls.length > 0) {
-        links.push(...directUrls);
-      }
-      if (missingKeys.length > 0) {
-        // request presigned urls for these keys
-        const created = await requestShareLinksFromServer(missingKeys);
-        links.push(...created);
-      }
-    }
+  //     if (directUrls.length > 0) {
+  //       links.push(...directUrls);
+  //     }
+  //     if (missingKeys.length > 0) {
+  //       // request presigned urls for these keys
+  //       const created = await requestShareLinksFromServer(missingKeys);
+  //       links.push(...created);
+  //     }
+  //   }
 
-    if (folderPaths.length > 0) {
-      // convert to prefixes expected by backend (remove leading slash, ensure trailing slash)
-      const prefixes = folderPaths.map((p) => (p.startsWith('/') ? p.slice(1) : p)).map((p) => (p.endsWith('/') ? p : `${p}/`));
+  //   if (folderPaths.length > 0) {
+  //     // convert to prefixes expected by backend (remove leading slash, ensure trailing slash)
+  //     const prefixes = folderPaths.map((p) => (p.startsWith('/') ? p.slice(1) : p)).map((p) => (p.endsWith('/') ? p : `${p}/`));
 
-      // Server expects keys array: we will pass prefixes and metadata indicating folder share
-      try {
-        const created = await requestShareLinksFromServer(prefixes, { type: 'folder' });
-        links.push(...created);
-      } catch (err) {
-        // rethrow to allow caller show message, handled below
-        throw err;
-      }
-    }
+  //     // Server expects keys array: we will pass prefixes and metadata indicating folder share
+  //     try {
+  //       const created = await requestShareLinksFromServer(prefixes, { type: 'folder' });
+  //       links.push(...created);
+  //     } catch (err) {
+  //       // rethrow to allow caller show message, handled below
+  //       throw err;
+  //     }
+  //   }
 
-    return links;
-  };
+  //   return links;
+  // };
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -580,75 +580,85 @@ function Gallery() {
     }
   };
 
-  const handleShare = async () => {
-    if (selectedItems.length === 0) {
-      addNotification('No items selected to share', 'error');
-      return;
-    }
-    
-    // Check if any folders are selected
-    const selectedFolders = selectedItems.filter((id) => id.startsWith('/'));
-    
-    if (selectedFolders.length > 0) {
-      // If folders are selected, navigate to shared images page
-      // For now, take the first selected folder (can be enhanced to handle multiple)
-      const firstFolder = selectedFolders[0];
-      const encodedPath = encodeURIComponent(firstFolder);
-      navigate(`/shared-images/${encodedPath}`);
-    } else {
-      // If only images are selected, use the original share modal behavior
-      try {
-        addNotification('Generating share link(s)...', 'info');
-        const links = await generateShareableLinks(selectedItems);
+// Inside Gallery component
 
-        if (links.length === 0) {
-          addNotification('No share links generated', 'error');
-          return;
-        }
+const handleShare = async () => {
+  if (selectedItems.length === 0) {
+    addNotification('No items selected to share', 'error');
+    return;
+  }
 
-        setShareModal({ isOpen: true, links, serverMessage: null });
-      } catch (err: any) {
-        console.error('Share error:', err);
-        // If server returned a JSON stringified error (we threw JSON), try to extract message
-        let message = err.message || 'Share failed';
-        try {
-          const parsed = JSON.parse(message);
-          if (parsed && parsed.message) message = parsed.message;
-          else if (parsed && typeof parsed === 'object') message = JSON.stringify(parsed);
-        } catch (e) {
-          // not JSON
-        }
-        addNotification(`Share failed: ${message}`, 'error');
-        setError(`Share failed: ${message}`);
-        // show share modal with server message where applicable
-        setShareModal({ isOpen: true, links: [], serverMessage: message });
-      }
-    }
-  };
+  try {
+    addNotification('Generating share link(s)...', 'info');
+    const links = await generateShareableLinks(selectedItems);
 
-  const handleShareSingle = async (item: GalleryItem) => {
-    const link = item.imageUrl;
-    if (link) {
-      // If it already has a direct URL, show share modal with that link
-      setShareModal({ isOpen: true, links: [link], serverMessage: null });
+    if (links.length === 0) {
+      addNotification('No share links generated', 'error');
       return;
     }
 
-    // Otherwise, ask server for a presigned url for the single key
+    setShareModal({ isOpen: true, links, serverMessage: null });
+  } catch (err: any) {
+    console.error('Share error:', err);
+    let message = err.message || 'Share failed';
     try {
-      const created = await requestShareLinksFromServer([item.key || item.id]);
-      if (created && created.length) {
-        setShareModal({ isOpen: true, links: created, serverMessage: null });
-      } else {
-        addNotification('No share link created', 'error');
-      }
-    } catch (err: any) {
-      console.error('Share single failed:', err);
-      addNotification(`Share failed: ${err.message}`, 'error');
-      setShareModal({ isOpen: true, links: [], serverMessage: err.message });
+      const parsed = JSON.parse(message);
+      if (parsed && parsed.message) message = parsed.message;
+      else if (parsed && typeof parsed === 'object') message = JSON.stringify(parsed);
+    } catch (e) {
+      // not JSON
     }
-  };
+    addNotification(`Share failed: ${message}`, 'error');
+    setError(`Share failed: ${message}`);
+    setShareModal({ isOpen: true, links: [], serverMessage: message });
+  }
+};
 
+const generateShareableLinks = async (forItemIds: string[]) => {
+  const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
+  const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
+  const links: string[] = [];
+
+  // Generate share links for folders locally
+  const baseUrl = window.location.origin || 'http://localhost:5173';
+  for (const folderPath of folderPaths) {
+    const encodedPath = encodeURIComponent(folderPath);
+    const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
+    links.push(shareLink);
+  }
+
+  // Handle files
+  if (itemIds.length > 0) {
+    const itemsToShare = items.filter((it) => itemIds.includes(it.id));
+    const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
+    const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
+
+    if (directUrls.length > 0) {
+      links.push(...directUrls);
+    }
+    if (missingKeys.length > 0) {
+      const created = await requestShareLinksFromServer(missingKeys);
+      links.push(...created);
+    }
+  }
+
+  return links;
+};
+
+// (Optional) Updated handleShareSingle if you want files to use /shared-images format
+const handleShareSingle = async (item: GalleryItem) => {
+  try {
+    const baseUrl = window.location.origin || 'http://localhost:5173';
+    const path = item.key || item.id;
+    const encodedPath = encodeURIComponent(path);
+    const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
+    setShareModal({ isOpen: true, links: [shareLink], serverMessage: null });
+  } catch (err: any) {
+    console.error('Share single failed:', err);
+    addNotification(`Share failed: ${err.message}`, 'error');
+    setShareModal({ isOpen: true, links: [], serverMessage: err.message });
+  }
+};
   // -------------------- Filters & sorting (unchanged logic from original) --------------------
   const filteredImages = items
     .filter((item) => {
