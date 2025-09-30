@@ -28,7 +28,7 @@ isSupported().then((supported) => {
 });
 
 interface HeaderProps {
-  title: string;
+  
   sidebarCollapsed: boolean;
 }
 

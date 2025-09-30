@@ -376,47 +376,9 @@ function ProposalCreate() {
       console.log(`Proposal created successfully with ID: ${newProposalId}`);
 
       // 2) Call backend to send email (Lambda / API Gateway)
-      const proposalLink = `https://arif-photography-fe.vercel.app/proposals/view/${newProposalId}`;
-
-      // Build email payload that backend expects (include proposalLink)
-      const emailPayload = {
-        to: recipient,
-        subject: `Proposal from ${proposalData.clientName || 'Client'} — #${newProposalId}`,
-        proposalId: newProposalId,
-        clientName: proposalData.clientName,
-        events: proposalData.events,
-        servicesProvided: proposalData.servicesProvided,
-        addOns: proposalData.addOns,
-        subtotal: calculateSubtotal(),
-        total: calculateTotal(),
-        notes: proposalData.footerNote,
-        proposalLink
-      };
-
-      // Adjust this endpoint to your deployed Sendmail Lambda / API Gateway URL
-      const sendResponse = await fetch(SENDMAIL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload)
-      });
-
-      // Parse response safely
-      let sendResult: any = { success: sendResponse.ok };
-      try {
-        sendResult = await sendResponse.json();
-      } catch (err) {
-        // ignore parse error, keep sendResult.success from status
-      }
-
-      if (!sendResponse.ok || !sendResult.success) {
-        console.warn('Email send failed on backend:', sendResult);
-        alert(`Proposal was created (ID: ${newProposalId}), but sending the email failed. Please send the link manually: ${proposalLink}`);
-      } else {
-        alert('Proposal saved and email sent successfully!');
-      }
-
+  
       // navigate back to lead
-      navigate(`/leads/${leadId}`);
+      navigate(`/proposal/${newProposalId}`);
     } catch (error: any) {
       console.error('Error sending proposal:', error);
       alert(`Error: ${error.message || 'An unexpected error occurred'}`);
@@ -452,7 +414,7 @@ function ProposalCreate() {
           <h2 className="text-xl font-semibold text-red-700 mb-2">Loading Failed</h2>
           <p className="text-red-600 mb-6">{error}</p>
           <button
-              onClick={() => navigate('/leads')}
+              onClick={() => navigate('/proposals')}
               className="flex items-center mx-auto px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
           >
               <ArrowLeft className="h-4 w-4 mr-2" />

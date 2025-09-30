@@ -315,7 +315,7 @@ function Calendar() {
                   {/* Left: Title */}
                   <div className="flex items-center">
                     <CalendarIcon className="h-6 w-6 text-[#00BCEB] mr-3" />
-                    <h2 className="text-2xl font-bold text-[#2D2D2D]">Studio Calendar</h2>
+                    {/* <h2 className="text-2xl font-bold text-[#2D2D2D]">Studio Calendar</h2> */}
                   </div>
 
                   {/* Center: View Toggle */}

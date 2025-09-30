@@ -147,7 +147,7 @@ function Projects() {
           {/* Top Section */}
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-2xl font-bold text-[#2D2D2D]">Projects</h2>
+              {/* <h2 className="text-2xl font-bold text-[#2D2D2D]">Projects</h2> */}
               <p className="text-gray-600 mt-1">Manage your photography projects and track progress</p>
             </div>
             {/* <button

@@ -500,7 +500,7 @@ function TeamManagement() {
         <main className="pt-16 p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-2xl font-bold text-[#2D2D2D]">Team Directory</h2>
+              {/* <h2 className="text-2xl font-bold text-[#2D2D2D]">Team Directory</h2> */}
               <p className="text-gray-600 mt-1">Manage your team members, roles, and permissions</p>
             </div>
             <button

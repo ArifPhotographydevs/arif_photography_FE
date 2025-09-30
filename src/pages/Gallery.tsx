@@ -673,6 +673,7 @@ const handleShareSingle = async (item: GalleryItem) => {
       const matchesFavorites = !filters.favorites || item.isFavorite;
       const matchesWatermarked = !filters.watermarked || item.isWatermarked;
       const matchesPinProtected = !filters.pinProtected || item.isPinProtected;
+      
 
       return matchesMonth && matchesShootType && matchesSearch && matchesFavorites && matchesWatermarked && matchesPinProtected;
     })
@@ -759,13 +760,14 @@ const handleShareSingle = async (item: GalleryItem) => {
     setSelectedItems(allImageIds);
   };
 
-  const handleCopyAllImageNames = () => {
+const handleCopyAllImageNames = () => {
     const allImageNames = filteredImages.map(item => item.title);
     if (allImageNames.length === 0) {
       addNotification('No images found to copy', 'info');
       return;
     }
-    copyImageListToClipboard(allImageNames);
+    setImageNames(allImageNames); // Set image names for popup display
+    setShowPopup(true); // Open the popup
   };
 
   const handleClearSelection = () => {
@@ -898,7 +900,7 @@ const handleShareSingle = async (item: GalleryItem) => {
   };
 
   // Handle showing image list for client selection folders
-  const handleShowImageList = async (folderPath: string, folderName: string) => {
+const handleShowImageList = async (folderPath: string, folderName: string) => {
     try {
       // Check if this is a client selection folder
       if (!folderPath.includes('client') && !folderPath.includes('selection')) {
@@ -931,12 +933,14 @@ const handleShareSingle = async (item: GalleryItem) => {
         throw new Error('Unexpected API response format');
       }
 
-      // Extract image names from the files
+      // Extract image names from the files and remove extensions
       const imageNames = data.files
         .filter((file: any) => file.key && typeof file.key === 'string')
         .map((file: any) => {
           const keyParts = file.key.split('/');
-          return keyParts.pop() || 'Untitled';
+          const fileName = keyParts.pop() || 'Untitled';
+          // Remove the file extension
+          return fileName.split('.')[0] || 'Untitled';
         })
         .filter((name: string) => name !== 'Untitled');
 
@@ -950,7 +954,7 @@ const handleShareSingle = async (item: GalleryItem) => {
       console.error('Error fetching image list:', err);
       addNotification(`Failed to load image list: ${err.message}`, 'error');
     }
-  };
+};
 
   // Copy image list to clipboard
   const copyImageListToClipboard = async (images: string[]) => {
@@ -1259,7 +1263,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                       Back
                     </button>
                   )}
-                  <h2 className="text-2xl font-bold text-[#2D2D2D]">Gallery Management</h2>
+                  {/* <h2 className="text-2xl font-bold text-[#2D2D2D]">Gallery Management</h2> */}
                 </div>
 
                 {/* Breadcrumbs */}
@@ -1354,7 +1358,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                     {sortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
                   </button>
 
-                  {/* Select All Button */}
+                 
                   {(filteredImages.length > 0 || folders.length > 0) && (
                     <button
                       onClick={handleSelectAll}
@@ -1375,13 +1379,13 @@ const handleShareSingle = async (item: GalleryItem) => {
                   {/* Quick Actions for Images */}
                   {filteredImages.length > 0 && (
                     <div className="flex items-center space-x-2">
-                      <button
+                      {/* <button
                         onClick={handleSelectAllImages}
                         className="flex items-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors duration-200 text-sm"
                       >
                         <Image className="w-4 h-4 mr-1" />
                         Select All Images
-                      </button>
+                      </button> */}
                       <button
                         onClick={handleCopyAllImageNames}
                         className="flex items-center px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors duration-200 text-sm"

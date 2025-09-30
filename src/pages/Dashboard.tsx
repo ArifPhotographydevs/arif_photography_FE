@@ -239,7 +239,6 @@ function Dashboard() {
       <div className={`flex-1 transition-all duration-300 ease-in-out ${
         sidebarCollapsed ? 'ml-16' : 'ml-64'
       }`}>
-        Header
         <Header title="Dashboard" sidebarCollapsed={sidebarCollapsed} />
 
         {/* Main Dashboard Content */}
