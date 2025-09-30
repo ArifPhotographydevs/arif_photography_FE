@@ -356,6 +356,8 @@ function ProposalCreate() {
         leadId: leadId,
         logo: undefined,
         logos: base64Logo ? [base64Logo] : [],
+        services: proposalData.servicesProvided, // Map servicesProvided to services for backend
+        servicesProvided: undefined, // Remove servicesProvided from payload
         subtotal: calculateSubtotal(),
         total: calculateTotal()
       };
@@ -385,7 +387,7 @@ function ProposalCreate() {
         proposalId: newProposalId,
         clientName: proposalData.clientName,
         events: proposalData.events,
-        servicesProvided: proposalData.servicesProvided,
+        services: proposalData.servicesProvided, // Map servicesProvided to services for email
         addOns: proposalData.addOns,
         subtotal: calculateSubtotal(),
         total: calculateTotal(),
