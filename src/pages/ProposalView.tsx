@@ -642,26 +642,20 @@ function ProposalView() {
               <div className="bg-gray-100 p-6 rounded-lg">
                 <h3 className="text-xl font-bold text-gray-900 mb-4">Advance Payment</h3>
                 <p className="text-gray-700 mb-4">40% of the total billing value to be paid as an advance to block the dates.</p>
-                <div className="bg-gray-600 text-white p-4 rounded-lg">
-                  <span className="font-bold">Advance Amount: ₹{Math.round(calculateTotal() * 0.4).toLocaleString()}</span>
-                </div>
               </div>
 
               <div className="bg-gray-100 p-6 rounded-lg">
                 <h3 className="text-xl font-bold text-gray-900 mb-4">Delivery Payment</h3>
                 <p className="text-gray-700 mb-4">50% payment before the wedding Day, Remaining 5% at the Delivery Time and final 5% after the Album finalization.</p>
                 <div className="space-y-2">
-                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
-                    <span>Before Wedding Day (50%):</span>
-                    <span>₹{Math.round(calculateTotal() * 0.5).toLocaleString()}</span>
+                  <div className="bg-gray-600 text-white p-4 rounded-lg">
+                    <span>Before Wedding Day: 50%</span>
                   </div>
-                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
-                    <span>At Delivery Time (5%):</span>
-                    <span>₹{Math.round(calculateTotal() * 0.05).toLocaleString()}</span>
+                  <div className="bg-gray-600 text-white p-4 rounded-lg">
+                    <span>At Delivery Time: 5%</span>
                   </div>
-                  <div className="bg-gray-600 text-white p-4 rounded-lg flex justify-between">
-                    <span>After Album Finalization (5%):</span>
-                    <span>₹{Math.round(calculateTotal() * 0.05).toLocaleString()}</span>
+                  <div className="bg-gray-600 text-white p-4 rounded-lg">
+                    <span>After Album Finalization: 5%</span>
                   </div>
                 </div>
               </div>
