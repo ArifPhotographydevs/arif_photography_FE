@@ -417,7 +417,7 @@ function ProposalCreate() {
         alert('Proposal saved and email sent successfully!');
       }
 
-      navigate(`/leads/${leadId}`);
+      navigate(`/proposals`);
     } catch (error: any) {
       console.error('Error sending proposal:', error);
       alert(`Error: ${error.message || 'An unexpected error occurred'}`);
