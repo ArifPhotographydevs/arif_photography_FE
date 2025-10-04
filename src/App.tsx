@@ -57,6 +57,7 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/client/login" element={<ClientLogin />} />
         <Route path="/leadform" element={<Leadform />} />
+        <Route path="/shared-images/:folderPath" element={<SharedImages />} />
 
         {/* Protected Routes (require authentication) */}
         <Route
@@ -111,10 +112,7 @@ function App() {
           path="/gallery"
           element={isAuthenticated ? <Gallery /> : <Navigate to="/login" replace />}
         />
-        <Route
-          path="/shared-images/:folderPath"
-          element={isAuthenticated ? <SharedImages /> : <Navigate to="/login" replace />}
-        />
+       
       <Route
   path="/gallery/upload/:projectId"
   element={isAuthenticated ? <GalleryUpload /> : <Navigate to="/login" replace />}

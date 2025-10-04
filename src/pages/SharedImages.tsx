@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -58,18 +57,17 @@ function SharedImages() {
   const [projectName, setProjectName] = useState<string>('default');
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
-  console.log('Decoded folder path:', decodedFolderPath);
 
   useEffect(() => {
-    // Extract projectName from the URL path (last segment after projects/gallery/)
     const pathSegments = decodedFolderPath.replace(/^\/+/, '').split('/');
     const galleryIndex = pathSegments.indexOf('gallery');
     const name = galleryIndex !== -1 && galleryIndex + 1 < pathSegments.length ? pathSegments[galleryIndex + 1] : decodedFolderPath.split('/').pop() || 'default';
     setProjectName(name);
-    console.log('Calculated projectName from URL:', name);
   }, [decodedFolderPath]);
 
   const fetchFolderItems = useCallback(async () => {
@@ -84,9 +82,7 @@ function SharedImages() {
       if (prefix.startsWith('/')) {
         prefix = prefix.slice(1);
       }
-      console.log('Final fetch prefix:', prefix);
 
-      // First fetch folders (non-recursive to get immediate subfolders)
       const foldersResponse = await fetch(
         `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
         {
@@ -97,22 +93,16 @@ function SharedImages() {
       );
 
       if (!foldersResponse.ok) {
-        throw new Error(`Failed to fetch folders: ${foldersResponse.status} ${foldersResponse.statusText}`);
+        throw new Error(`Failed to fetch folders: ${foldersResponse.statusText}`);
       }
 
       const foldersData: ApiResponse = await foldersResponse.json();
-      console.log('Raw folders API response:', foldersData);
-
-      // Map folders - handle case where folders array might be empty
       const mappedFolders: FolderItem[] = foldersData.folders ? foldersData.folders.map((folder: any) => ({
         name: folder.name,
         path: folder.path,
       })) : [];
-
-      console.log('Mapped folders:', mappedFolders);
       setFolders(mappedFolders);
 
-      // Then fetch all images recursively (including subfolders)
       const imagesResponse = await fetch(
         `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
         {
@@ -123,23 +113,18 @@ function SharedImages() {
       );
 
       if (!imagesResponse.ok) {
-        throw new Error(`Failed to fetch images: ${imagesResponse.status} ${imagesResponse.statusText}`);
+        throw new Error(`Failed to fetch images: ${imagesResponse.statusText}`);
       }
 
       const data: ApiResponse = await imagesResponse.json();
-      console.log('Raw images API response:', data);
 
       if (!data || !Array.isArray(data.files)) {
         throw new Error('Unexpected API response format');
       }
 
-      // Filter and map valid items
-      const invalidItems: any[] = [];
       const mappedItems: GalleryItem[] = data.files
         .map((item: any) => {
-          console.log('Processing item key:', item.key);
-          if (!item.key || item.key === null || item.key === undefined || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
-            invalidItems.push({ ...item, reason: 'Invalid key' });
+          if (!item.key || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
             return null;
           }
           const keyParts = item.key.split('/');
@@ -173,15 +158,8 @@ function SharedImages() {
         })
         .filter((item): item is GalleryItem => item !== null);
 
-      console.log('Invalid items filtered out:', invalidItems);
-      console.log('Mapped items:', mappedItems);
-      if (mappedItems.length === 0) {
-        console.warn('No valid items found in API response. Check if images exist in the folder or if API response is malformed.');
-        addNotification('No valid images found in this folder.', 'error');
-      }
       setItems(mappedItems);
     } catch (err: any) {
-      console.error('Error fetching folder items:', err);
       setError(`Failed to load folder items: ${err.message}`);
     } finally {
       setLoading(false);
@@ -190,6 +168,7 @@ function SharedImages() {
 
   useEffect(() => {
     fetchFolderItems();
+    setCurrentPage(1);
   }, [fetchFolderItems]);
 
   const handleItemFavorite = async (itemId: string) => {
@@ -201,47 +180,27 @@ function SharedImages() {
 
     if (!isCurrentlyFavorited) {
       const item = items.find(item => item.id === itemId);
-      if (!item) {
+      if (!item || !item.key) {
         addNotification('Image not found', 'error');
-        return;
-      }
-
-      const imageKey = item.key;
-      console.log('Favoriting item with key:', { itemId, imageKey });
-      if (!imageKey || typeof imageKey !== 'string' || !imageKey.includes('/') || imageKey.trim() === '') {
-        console.error('Invalid image key for item:', { itemId, imageKey, item });
-        addNotification('Cannot favorite: Invalid image key', 'error');
-        setFavoritedItems(favoritedItems.filter(id => id !== itemId));
         return;
       }
 
       try {
         const folderName = 'client%20selection';
         const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
-        const projectNameFromURL = projectName;
-
-        console.log('Copying image to client selection folder:', {
-          folderName,
-          imageKeys: [imageKey],
-          sourceFolder,
-          item,
-          projectName: projectNameFromURL,
-        });
 
         const result = await createFavoritesFolderAPI({
           folderName,
-          imageKeys: [imageKey],
+          imageKeys: [item.key],
           sourceFolder,
         });
 
         if (result.success) {
-          addNotification(`Image added to "${projectNameFromURL}" folder under client selection`, 'success');
-          // Removed automatic navigation to prevent unwanted redirects
+          addNotification(`Image added to "${projectName}" folder under client selection`, 'success');
         } else {
           throw new Error('Failed to add image to client selection folder');
         }
       } catch (err: any) {
-        console.error('Error adding image to client selection folder:', err);
         addNotification(`Failed to add image to client selection: ${err.message}`, 'error');
         setFavoritedItems(favoritedItems.filter(id => id !== itemId));
       }
@@ -258,9 +217,8 @@ function SharedImages() {
       const imageKeys = items
         .map(item => item.key)
         .filter((key): key is string => !!key && typeof key === 'string' && key.includes('/') && key.trim() !== '');
-      
+
       if (imageKeys.length === 0) {
-        console.error('No valid image keys found for favoriting all:', { items });
         addNotification('No valid images to favorite', 'error');
         setFavoritedItems([]);
         return;
@@ -269,14 +227,6 @@ function SharedImages() {
       try {
         const folderName = 'client%20selection';
         const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
-        const projectNameFromURL = projectName;
-
-        console.log('Copying all images to client selection folder:', {
-          folderName,
-          imageKeys,
-          sourceFolder,
-          projectName: projectNameFromURL,
-        });
 
         const result = await createFavoritesFolderAPI({
           folderName,
@@ -285,13 +235,11 @@ function SharedImages() {
         });
 
         if (result.success) {
-          addNotification(`${imageKeys.length} images added to "${projectNameFromURL}" folder under client selection`, 'success');
-          // Removed automatic navigation to prevent unwanted redirects
+          addNotification(`${imageKeys.length} images added to "${projectName}" folder under client selection`, 'success');
         } else {
           throw new Error('Failed to add images to client selection folder');
         }
       } catch (err: any) {
-        console.error('Error adding images to client selection folder:', err);
         addNotification(`Failed to add images to client selection: ${err.message}`, 'error');
         setFavoritedItems([]);
       }
@@ -315,29 +263,81 @@ function SharedImages() {
     window.history.back();
   };
 
-  const handleDownloadSelected = async () => {
-    if (favoritedItems.length === 0) {
-      addNotification('Please favorite images to download', 'error');
-      return;
-    }
-
+  // Try to fetch blob and save — if CORS blocks fetch, fallback to <a> download link.
+  const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
     try {
-      const favoritedImages = items.filter(item => favoritedItems.includes(item.id));
-      
-      for (const image of favoritedImages) {
+      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      return true;
+    } catch (err: any) {
+      console.warn('Direct fetch failed (possibly CORS). Falling back to <a> download link.', err);
+      // Fallback: create temporary <a> tag to trigger download
+      try {
         const link = document.createElement('a');
-        link.href = image.imageUrl;
-        link.download = image.title;
-        link.target = '_blank';
+        link.href = url;
+        link.download = filename;
+        link.target = '_blank'; // Optional: open in new tab if download doesn't trigger
+        link.rel = 'noopener noreferrer';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        addNotification(`Download started for ${filename}`, 'info');
+        return true;
+      } catch (e) {
+        console.error('Fallback download failed', e);
+        addNotification(`Download failed: ${err.message}`, 'error');
+        return false;
       }
-      
-      addNotification(`Downloaded ${favoritedImages.length} images`, 'success');
+    }
+  };
+
+  const handleDownloadSelected = async (downloadAll: boolean = false) => {
+    try {
+      const itemsToDownload = downloadAll ? items : (favoritedItems.length > 0 
+        ? items.filter(item => favoritedItems.includes(item.id))
+        : items);
+
+      if (itemsToDownload.length === 0) {
+        addNotification('No items to download', 'error');
+        return;
+      }
+
+      let successCount = 0;
+      for (const item of itemsToDownload) {
+        const ext = item.isVideo ? 'mp4' : 'jpg';
+        const filename = `${item.title}.${ext}`;
+        const success = await fetchBlobOrDownloadLink(item.imageUrl, filename);
+        if (success) successCount++;
+      }
+
+      addNotification(`Downloaded ${successCount} of ${itemsToDownload.length} items`, 'success');
     } catch (err: any) {
-      console.error('Error downloading images:', err);
-      addNotification('Failed to download images', 'error');
+      console.error('Download error:', err);
+      addNotification(
+        `Failed to download items: ${err.message.includes('Forbidden') ? 'Permission denied - check presigned URL or contact support' : err.message}`,
+        'error'
+      );
+    }
+  };
+
+  const handleDownloadCurrentImage = async () => {
+    if (selectedImageIndex !== null) {
+      const item = items[selectedImageIndex];
+      const ext = item.isVideo ? 'mp4' : 'jpg';
+      const filename = `${item.title}.${ext}`;
+      const success = await fetchBlobOrDownloadLink(item.imageUrl, filename);
+      if (success) {
+        addNotification('Item downloaded', 'success');
+      }
     }
   };
 
@@ -363,21 +363,6 @@ function SharedImages() {
     }
   };
 
-  const handleDownloadCurrentImage = () => {
-    if (selectedImageIndex !== null) {
-      const image = items[selectedImageIndex];
-      const link = document.createElement('a');
-      link.href = image.imageUrl;
-      link.download = image.title;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      addNotification('Image downloaded', 'success');
-    }
-  };
-
-  // Keyboard navigation
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (!isImageModalOpen) return;
@@ -400,9 +385,8 @@ function SharedImages() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isImageModalOpen, selectedImageIndex]);
+  }, [isImageModalOpen]);
 
-  // Prevent body scroll when modal is open
   useEffect(() => {
     if (isImageModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -414,6 +398,13 @@ function SharedImages() {
       document.body.style.overflow = 'unset';
     };
   }, [isImageModalOpen]);
+
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = items.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(items.length / itemsPerPage);
+
+  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
 
   if (loading) {
     return (
@@ -440,11 +431,9 @@ function SharedImages() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-white shadow-sm border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            {/* Back Button and Title */}
             <div className="flex items-center space-x-2 sm:space-x-4 flex-1 min-w-0">
               <button
                 onClick={handleBackToGallery}
@@ -455,8 +444,6 @@ function SharedImages() {
               </button>
               <div className="h-4 sm:h-6 w-px bg-gray-300 flex-shrink-0" />
               <h1 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">
-                <span className="hidden sm:inline">Shared Images - </span>
-                <span className="sm:hidden">Images - </span>
                 {decodedFolderPath ? 
                   (decodedFolderPath.length > 30 ? 
                     `...${decodedFolderPath.slice(-30)}` : 
@@ -465,66 +452,63 @@ function SharedImages() {
                 }
               </h1>
             </div>
-
-            {/* View Controls */}
             <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
-              <div className="flex items-center space-x-1 sm:space-x-2">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-lg transition-colors ${
-                    viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  <Grid3X3 className="h-4 w-4 sm:h-5 sm:w-5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-lg transition-colors ${
-                    viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  <List className="h-4 w-4 sm:h-5 sm:w-5" />
-                </button>
-              </div>
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <Grid3X3 className="h-4 w-4 sm:h-5 sm:w-5" />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-lg transition-colors ${
+                  viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <List className="h-4 w-4 sm:h-5 sm:w-5" />
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Favorites Bar */}
-      {favoritedItems.length > 0 && (
-        <div className="bg-blue-50 border-b border-blue-200">
+      {items.length > 0 && (
+        <div className="bg-blue-50 border-b border-blue-200 sticky top-16 z-30">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
               <div className="flex items-center space-x-4">
-                <span className="text-blue-800 font-medium text-sm sm:text-base">
-                  {favoritedItems.length} favorite{favoritedItems.length !== 1 ? 's' : ''} selected
-                </span>
-                <button
-                  onClick={() => setFavoritedItems([])}
-                  className="text-blue-600 hover:text-blue-800 transition-colors text-sm sm:text-base"
-                >
-                  Clear favorites
-                </button>
+                {favoritedItems.length > 0 && (
+                  <>
+                    <span className="text-blue-800 font-medium text-sm sm:text-base">
+                      {favoritedItems.length} selected
+                    </span>
+                    <button
+                      onClick={() => setFavoritedItems([])}
+                      className="text-blue-600 hover:text-blue-800 transition-colors text-sm sm:text-base"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
               </div>
               <div className="flex items-center space-x-2 sm:space-x-3">
+                {favoritedItems.length > 0 && (
+                  <button
+                    onClick={() => handleDownloadSelected(false)}
+                    className="flex items-center space-x-2 px-3 py-1.5 sm:py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Download Selected</span>
+                  </button>
+                )}
                 <button
-                  onClick={handleDownloadSelected}
+                  onClick={() => handleDownloadSelected(true)}
                   className="flex items-center space-x-2 px-3 py-1.5 sm:py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
                 >
                   <Download className="h-4 w-4" />
-                  <span>Download</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const clientSelectionPath = `projects/client%20selection/${projectName}`;
-                    navigate(`/shared-images/${encodeURIComponent(clientSelectionPath)}`);
-                  }}
-                  className="flex items-center space-x-2 px-3 py-1.5 sm:py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm sm:text-base"
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  <span className="hidden sm:inline">View Client Selection</span>
-                  <span className="sm:hidden">View Selection</span>
+                  <span>Download All</span>
                 </button>
               </div>
             </div>
@@ -532,29 +516,18 @@ function SharedImages() {
         </div>
       )}
 
-      {/* Instructions */}
       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center space-x-3 text-blue-800">
-            <div className="flex-shrink-0">
-              <Heart className="h-6 w-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium leading-relaxed">
-                Click the heart icon on any image to add it to your favorites. 
-                <span className="font-semibold">Selected images will be saved to your "{projectName}" folder</span> in the client selection area.
-              </p>
-              <p className="text-xs text-blue-600 mt-1">
-                💡 Tip: Use "Favorite All" to quickly select all images, or "View Client Selection" to see your saved images.
-              </p>
-            </div>
+          <div className="flex items-start space-x-3 text-blue-800">
+            <Heart className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <p className="text-sm leading-relaxed">
+              Tap the heart on images to select favorites. They&apos;ll be saved to your &quot;{projectName}&quot; folder in client selection.
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Favorite All Bar */}
         {items.length > 0 && (
           <div className="mb-6 flex items-center justify-between bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <button
@@ -563,43 +536,30 @@ function SharedImages() {
             >
               <Heart className={`h-5 w-5 ${favoritedItems.length === items.length ? 'fill-current' : ''}`} />
               <span className="font-medium">
-                {favoritedItems.length === items.length ? 'Unfavorite All' : 'Favorite All'}
+                {favoritedItems.length === items.length ? 'Unselect All' : 'Select All'}
               </span>
             </button>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-500">
-                {items.length} item{items.length !== 1 ? 's' : ''} total
-              </span>
-              {favoritedItems.length > 0 && (
-                <span className="text-sm font-medium text-blue-600">
-                  {favoritedItems.length} selected
-                </span>
-              )}
-            </div>
+            <span className="text-sm text-gray-500">
+              {items.length} items total
+            </span>
           </div>
         )}
 
-        {/* Folders Section */}
         {folders.length > 0 && (
           <div className="mb-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Folders</h2>
-            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {folders.map((folder) => (
                 <div
                   key={folder.path}
                   onClick={() => handleFolderClick(folder.path)}
-                  className="relative group bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
+                  className="group bg-white rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow duration-200 cursor-pointer"
                 >
-                  <div className="aspect-square bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
-                    <FolderPlus className="h-12 w-12 text-blue-500" />
+                  <div className="aspect-[4/3] bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+                    <FolderPlus className="h-12 w-12 text-blue-500 group-hover:scale-110 transition-transform duration-200" />
                   </div>
                   <div className="p-3">
-                    <h3 className="text-sm font-medium text-gray-900 truncate" title={folder.name}>
-                      {folder.name}
-                    </h3>
-                    <p className="text-xs text-gray-500 truncate" title={folder.path}>
-                      {folder.path}
-                    </p>
+                    <h3 className="text-sm font-medium text-gray-900 truncate">{folder.name}</h3>
                   </div>
                 </div>
               ))}
@@ -607,244 +567,192 @@ function SharedImages() {
           </div>
         )}
 
-        {/* Images Section */}
         {items.length === 0 && folders.length === 0 ? (
           <div className="text-center py-12">
             <FolderPlus className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No content found</h3>
-            <p className="text-gray-500">This folder doesn't contain any images or subfolders.</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Empty Folder</h3>
+            <p className="text-gray-500">No images or folders here yet.</p>
           </div>
         ) : items.length > 0 ? (
           <div>
             {folders.length > 0 && (
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Images</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Images & Videos</h2>
             )}
             <div className={viewMode === 'grid' 
-              ? 'grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4'
-              : 'space-y-2'
+              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4'
+              : 'space-y-4'
             }>
-              {items.map((item) => (
+              {currentItems.map((item, index) => (
                 <div
                   key={item.id}
-                  className={`relative group bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${
-                    favoritedItems.includes(item.id) ? 'ring-2 ring-blue-500' : ''
-                  }`}
+                  className={`group bg-white rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow duration-200 ${
+                    favoritedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
+                  } ${viewMode === 'list' ? 'flex items-center space-x-4 p-4' : ''}`}
                 >
-                  {/* Favorite Heart */}
-                  <div className="absolute top-2 left-2 z-10">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        handleItemFavorite(item.id);
-                      }}
-                      className={`p-1.5 rounded-full backdrop-blur-sm bg-white/80 shadow-sm transition-all duration-200 hover:scale-110 ${
-                        favoritedItems.includes(item.id) 
-                          ? 'text-red-500 bg-red-50 border border-red-200' 
-                          : 'text-gray-400 hover:text-red-400 border border-gray-200'
-                      }`}
-                    >
-                      <Heart className="h-4 w-4" fill={favoritedItems.includes(item.id) ? 'currentColor' : 'none'} />
-                    </button>
-                  </div>
-
-                  {/* Image/Video */}
-                  <div className="aspect-square relative cursor-pointer">
+                  <button
+                    onClick={() => handleItemFavorite(item.id)}
+                    className={`absolute top-2 right-2 z-10 p-1.5 rounded-full bg-white/80 shadow-sm transition-all duration-200 hover:scale-110 ${
+                      favoritedItems.includes(item.id) 
+                        ? 'text-red-500' 
+                        : 'text-gray-400 hover:text-red-400'
+                    }`}
+                  >
+                    <Heart className="h-4 w-4" fill={favoritedItems.includes(item.id) ? 'currentColor' : 'none'} />
+                  </button>
+                  <div className={`relative cursor-pointer ${viewMode === 'list' ? 'w-32 h-20 flex-shrink-0' : 'aspect-[4/3]'}`}
+                    onClick={() => handleViewImage(indexOfFirstItem + index)}>
                     {item.isVideo ? (
-                      <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                        <Play className="h-8 w-8 text-gray-400" />
+                      <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
+                        <video src={item.imageUrl} className="w-full h-full object-cover" muted loop />
+                        <Play className="h-8 w-8 text-white absolute" />
                       </div>
                     ) : (
                       <img
                         src={item.imageUrl}
                         alt={item.title}
                         className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
+                          addNotification(`Failed to load ${item.title}`, 'error');
+                        }}
                       />
                     )}
-                    
-                    {/* Overlay */}
-                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex items-center justify-center">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center space-x-2">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewImage(items.findIndex(i => i.id === item.id));
-                          }}
-                          className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors shadow-lg"
-                        >
-                          <Eye className="h-4 w-4 text-gray-600" />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const link = document.createElement('a');
-                            link.href = item.imageUrl;
-                            link.download = item.title;
-                            link.target = '_blank';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                          className="p-2 bg-white rounded-full hover:bg-gray-100 transition-colors shadow-lg"
-                        >
-                          <Download className="h-4 w-4 text-gray-600" />
-                        </button>
-                      </div>
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                      <Eye className="h-6 w-6 text-white" />
                     </div>
                   </div>
-
-                  {/* Item Info */}
-                  <div className="p-3">
-                    <h3 className="text-sm font-medium text-gray-900 truncate">
-                      {item.title}
-                    </h3>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {item.eventDate}
-                    </p>
+                  <div className={`${viewMode === 'list' ? 'flex-1' : 'p-3'}`}>
+                    <h3 className="text-sm font-medium text-gray-900 truncate">{item.title}</h3>
+                    <p className="text-xs text-gray-500">{item.eventDate}</p>
                   </div>
                 </div>
               ))}
             </div>
+            {totalPages > 1 && (
+              <div className="mt-8 flex justify-center items-center space-x-2">
+                <button
+                  onClick={() => paginate(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-md bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => paginate(i + 1)}
+                    className={`px-4 py-2 rounded-md ${
+                      currentPage === i + 1 ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+                <button
+                  onClick={() => paginate(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-md bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
 
-      {/* Notifications */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {notifications.map((notification) => (
           <div
             key={notification.id}
-            className={`px-4 py-3 rounded-lg shadow-lg max-w-sm ${
-              notification.type === 'success'
-                ? 'bg-green-600 text-white'
-                : 'bg-red-600 text-white'
+            className={`px-4 py-3 rounded-lg shadow-lg max-w-sm flex items-center justify-between ${
+              notification.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{notification.message}</span>
-              <button
-                onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
-                className="ml-2 text-white hover:text-gray-200"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+            <span className="text-sm font-medium">{notification.message}</span>
+            <button
+              onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
+              className="ml-4 text-white hover:text-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         ))}
       </div>
 
-      {/* Image Modal */}
       {isImageModalOpen && selectedImageIndex !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div 
-            className="absolute inset-0 bg-black bg-opacity-90"
-            onClick={handleCloseImageModal}
-          />
-          
-          {/* Modal Content */}
-          <div className="relative w-full h-full flex items-center justify-center p-4">
-            {/* Close Button */}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
+          <div className="relative w-full h-full max-w-7xl max-h-[90vh] p-4">
             <button
               onClick={handleCloseImageModal}
-              className="absolute top-4 right-4 z-10 p-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-white transition-all duration-200"
+              className="absolute top-4 right-4 z-20 p-2 bg-black/50 rounded-full text-white hover:bg-black/70"
             >
               <X className="h-6 w-6" />
             </button>
-
-            {/* Previous Button */}
             {selectedImageIndex > 0 && (
               <button
                 onClick={handlePrevImage}
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 z-10 p-3 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-white transition-all duration-200"
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 bg-black/50 rounded-full text-white hover:bg-black/70"
               >
                 <ChevronLeft className="h-8 w-8" />
               </button>
             )}
-
-            {/* Next Button */}
             {selectedImageIndex < items.length - 1 && (
               <button
                 onClick={handleNextImage}
-                className="absolute right-4 top-1/2 transform -translate-y-1/2 z-10 p-3 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-white transition-all duration-200"
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 bg-black/50 rounded-full text-white hover:bg-black/70"
               >
                 <ChevronRight className="h-8 w-8" />
               </button>
             )}
-
-            {/* Image Container */}
-            <div className="relative max-w-full max-h-full">
+            <div className="flex items-center justify-center h-full">
               {items[selectedImageIndex]?.isVideo ? (
-                <div className="flex items-center justify-center bg-gray-800 rounded-lg p-8 max-w-4xl max-h-96">
-                  <Play className="h-16 w-16 text-white" />
-                  <span className="ml-4 text-white text-lg">Video Preview Not Available</span>
-                </div>
+                <video
+                  src={items[selectedImageIndex]?.imageUrl}
+                  className="max-w-full max-h-full object-contain rounded-lg"
+                  controls
+                  autoPlay
+                  loop
+                  onError={() => addNotification('Failed to load video', 'error')}
+                />
               ) : (
                 <img
                   src={items[selectedImageIndex]?.imageUrl}
                   alt={items[selectedImageIndex]?.title}
-                  className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-                  style={{ maxHeight: 'calc(100vh - 120px)', maxWidth: 'calc(100vw - 120px)' }}
+                  className="max-w-full max-h-full object-contain rounded-lg"
+                  onError={(e) => {
+                    e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
+                    addNotification('Failed to load image', 'error');
+                  }}
                 />
               )}
             </div>
-
-            {/* Image Info & Actions */}
-            <div className="absolute bottom-4 left-4 right-4 z-10">
-              <div className="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-4 mx-auto max-w-2xl">
+            <div className="absolute bottom-4 left-0 right-0 z-20">
+              <div className="mx-auto max-w-2xl bg-black/50 backdrop-blur-md rounded-lg p-4 text-white">
                 <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 truncate">
-                      {items[selectedImageIndex]?.title}
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      {items[selectedImageIndex]?.eventDate} • {selectedImageIndex + 1} of {items.length}
+                  <div>
+                    <h3 className="text-lg font-semibold truncate">{items[selectedImageIndex]?.title}</h3>
+                    <p className="text-sm opacity-80">
+                      {items[selectedImageIndex]?.eventDate} • {selectedImageIndex + 1}/{items.length}
                     </p>
                   </div>
-                  <div className="flex items-center space-x-3 ml-4">
+                  <div className="flex space-x-4">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleItemFavorite(items[selectedImageIndex].id);
-                      }}
-                      className={`p-2 rounded-full transition-all duration-200 ${
-                        favoritedItems.includes(items[selectedImageIndex].id)
-                          ? 'text-red-500 bg-red-50 border border-red-200'
-                          : 'text-gray-400 hover:text-red-400 bg-gray-50 border border-gray-200'
-                      }`}
+                      onClick={() => handleItemFavorite(items[selectedImageIndex].id)}
+                      className={`p-2 rounded-full ${
+                        favoritedItems.includes(items[selectedImageIndex].id) ? 'text-red-400' : 'text-white'
+                      } hover:bg-black/30`}
                     >
-                      <Heart 
-                        className="h-5 w-5" 
-                        fill={favoritedItems.includes(items[selectedImageIndex].id) ? 'currentColor' : 'none'} 
-                      />
+                      <Heart className="h-5 w-5" fill={favoritedItems.includes(items[selectedImageIndex].id) ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={handleDownloadCurrentImage}
-                      className="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors duration-200"
+                      className="p-2 rounded-full text-white hover:bg-black/30"
                     >
                       <Download className="h-5 w-5" />
                     </button>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Keyboard Navigation Hints */}
-            <div className="absolute top-4 left-4 z-10">
-              <div className="bg-white bg-opacity-20 backdrop-blur-sm rounded-lg p-3 text-white text-sm">
-                <div className="flex items-center space-x-4">
-                  <span className="flex items-center space-x-1">
-                    <kbd className="px-2 py-1 bg-white bg-opacity-20 rounded text-xs">←</kbd>
-                    <span>Prev</span>
-                  </span>
-                  <span className="flex items-center space-x-1">
-                    <kbd className="px-2 py-1 bg-white bg-opacity-20 rounded text-xs">→</kbd>
-                    <span>Next</span>
-                  </span>
-                  <span className="flex items-center space-x-1">
-                    <kbd className="px-2 py-1 bg-white bg-opacity-20 rounded text-xs">Esc</kbd>
-                    <span>Close</span>
-                  </span>
                 </div>
               </div>
             </div>

@@ -1,6 +1,11 @@
 /* Full modified Gallery.tsx — every single line included.
    Changes: simplified share flow to POST-only (no token fallback),
    robust response parsing, clearer errors/logging.
+   Additional Changes: Handle 3000+ uploads by batching presigned URL requests (200 files/batch),
+   concurrent uploads with concurrency limit (20 simultaneous), XMLHttpRequest for progress tracking.
+   Download Changes: Use actual filename with extension from S3 key for accurate local saving.
+   CORS Download Fix: If fetch fails due to CORS, create temporary <a> tag with download attribute to trigger browser download without new tab.
+   Loader Additions: Added loading indicators for folder creation, share generation, bulk download, image list fetching, and other operations.
 */
 
 import React, { useState, useEffect, Component, ErrorInfo, useRef } from 'react';
@@ -46,6 +51,7 @@ interface GalleryItem {
   eventDate: string;
   imageUrl: string;
   title: string;
+  filename: string; // Added for accurate download filename
   uploadDate: string;
   isWatermarked: boolean;
   isPinProtected: boolean;
@@ -77,6 +83,11 @@ interface Notification {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+interface PresignedUpload {
+  url: string;
+  key: string;
 }
 
 // -------------------- Error Boundary --------------------
@@ -112,6 +123,12 @@ const SHARE_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/defau
 // If you want a default TTL for presigned links, set it here:
 const DEFAULT_EXPIRY_SECONDS = 3600;
 
+// Upload batch size for presigned URLs (to avoid request size limits)
+const PRESIGNED_BATCH_SIZE = 200;
+
+// Max concurrent uploads (to avoid overwhelming network/S3)
+const MAX_CONCURRENT_UPLOADS = 20;
+
 // -------------------- Main Component --------------------
 function Gallery() {
   const navigate = useNavigate();
@@ -146,6 +163,10 @@ function Gallery() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [createFolderLoading, setCreateFolderLoading] = useState(false); // New: Loader for folder creation
+  const [shareLoading, setShareLoading] = useState(false); // New: Loader for share
+  const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false); // New: Loader for bulk download
+  const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
 
   const shootTypes = [
     'Wedding',
@@ -223,8 +244,8 @@ function Gallery() {
 
       const mappedItems: GalleryItem[] = data.files.map((item: any) => {
         const keyParts = item.key.split('/');
-        const rawTitle = keyParts.pop() || 'Untitled';
-        const title = rawTitle.replace(/\.[^/.]+$/, '');
+        const rawFilename = keyParts.pop() || 'Untitled.jpg';
+        const title = rawFilename.replace(/\.[^/.]+$/, '');
         let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
 
         const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
@@ -240,6 +261,7 @@ function Gallery() {
           eventDate,
           imageUrl: item.presigned_url || item.url || 'https://picsum.photos/400/300',
           title,
+          filename: rawFilename,
           uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
           isWatermarked: false,
           isPinProtected: false,
@@ -293,7 +315,7 @@ function Gallery() {
   };
 
   // -------------------- Download helpers --------------------
-  // Try to fetch blob and save — if CORS blocks fetch, fallback to opening url in new tab (user can download from there).
+  // Try to fetch blob and save — if CORS blocks fetch, fallback to <a> download link.
   const fetchBlobOrOpen = async (url: string, filename: string) => {
     try {
       const res = await fetch(url, { method: 'GET', mode: 'cors' });
@@ -302,18 +324,21 @@ function Gallery() {
       saveAs(blob, filename);
       return true;
     } catch (err: any) {
-      console.warn('Direct fetch failed (possibly CORS). Falling back to opening URL in new tab.', err);
-      // Fallback: open presigned url in new tab/window for user to download directly
+      console.warn('Direct fetch failed (possibly CORS). Falling back to <a> download link.', err);
+      // Fallback: create temporary <a> tag to trigger download
       try {
-        const newWin = window.open(url, '_blank', 'noopener,noreferrer');
-        if (!newWin) {
-          addNotification('Could not open new tab for download — popup blocked.', 'error');
-          return false;
-        }
-        addNotification(`Opened download link in new tab for ${filename}`, 'info');
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.target = '_blank'; // Optional: open in new tab if download doesn't trigger
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        addNotification(`Download started for ${filename}`, 'info');
         return true;
       } catch (e) {
-        console.error('Fallback open failed', e);
+        console.error('Fallback download failed', e);
         addNotification(`Download failed: ${err.message}`, 'error');
         return false;
       }
@@ -352,76 +377,83 @@ function Gallery() {
 
   // -------------------- Public download handlers --------------------
   const handleDownloadItem = async (item: GalleryItem) => {
-    const filename = `${item.title}${item.isVideo ? '.mp4' : '.jpg'}`;
-    addNotification(`Starting download: ${filename}`, 'info');
-    await fetchBlobOrOpen(item.imageUrl, filename);
+    addNotification(`Starting download: ${item.filename}`, 'info');
+    await fetchBlobOrOpen(item.imageUrl, item.filename);
   };
 
   // Bulk download selected items/folders
   const handleBulkDownload = async () => {
-    if (selectedItems.length === 0) {
-      addNotification('No items or folders selected for download', 'error');
-      return;
-    }
+    setBulkDownloadLoading(true);
+    addNotification('Preparing bulk download...', 'info');
+    try {
+      if (selectedItems.length === 0) {
+        addNotification('No items or folders selected for download', 'error');
+        return;
+      }
 
-    // separate item keys and folder paths
-    const selectedFiles = items.filter((it) => selectedItems.includes(it.id));
-    const selectedFolders = folders.filter((f) => selectedItems.includes(f.path));
+      // separate item keys and folder paths
+      const selectedFiles = items.filter((it) => selectedItems.includes(it.id));
+      const selectedFolders = folders.filter((f) => selectedItems.includes(f.path));
 
-    // if exactly one file and no folders => direct download single
-    if (selectedFiles.length === 1 && selectedFolders.length === 0) {
-      await handleDownloadItem(selectedFiles[0]);
-      return;
-    }
+      // if exactly one file and no folders => direct download single
+      if (selectedFiles.length === 1 && selectedFolders.length === 0) {
+        await handleDownloadItem(selectedFiles[0]);
+        return;
+      }
 
-    // build file list to zip
-    const fileList: { url: string; filename: string }[] = [];
+      // build file list to zip
+      const fileList: { url: string; filename: string }[] = [];
 
-    // add selected files
-    for (const it of selectedFiles) {
-      fileList.push({ url: it.imageUrl, filename: `${it.title}${it.isVideo ? '.mp4' : '.jpg'}` });
-    }
+      // add selected files
+      for (const it of selectedFiles) {
+        fileList.push({ url: it.imageUrl, filename: it.filename });
+      }
 
-    // for each selected folder, call your getallimages endpoint to list files inside and push into fileList
-    for (const folder of selectedFolders) {
-      try {
-        // Use the same getallimages lambda to list files under a prefix
-        let prefix = folder.path;
-        if (prefix.startsWith('/')) prefix = prefix.slice(1);
-        if (!prefix.endsWith('/')) prefix += '/';
+      // for each selected folder, call your getallimages endpoint to list files inside and push into fileList
+      for (const folder of selectedFolders) {
+        try {
+          // Use the same getallimages lambda to list files under a prefix
+          let prefix = folder.path;
+          if (prefix.startsWith('/')) prefix = prefix.slice(1);
+          if (!prefix.endsWith('/')) prefix += '/';
 
-        const resp = await fetch(
-          `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
-          { method: 'GET', headers: { 'Content-Type': 'application/json' }, mode: 'cors' }
-        );
+          const resp = await fetch(
+            `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
+            { method: 'GET', headers: { 'Content-Type': 'application/json' }, mode: 'cors' }
+          );
 
-        if (!resp.ok) {
-          console.warn('Folder listing failed for', folder.path, await resp.text());
-          continue;
-        }
-        const body = await resp.json();
-        if (body && Array.isArray(body.files)) {
-          for (const file of body.files) {
-            const url = file.presigned_url || file.url || file.presignedUrl;
-            const name = file.name || (file.key ? file.key.split('/').pop() : 'unnamed');
-            if (url) {
-              fileList.push({ url, filename: `${folder.name}/${name}` });
+          if (!resp.ok) {
+            console.warn('Folder listing failed for', folder.path, await resp.text());
+            continue;
+          }
+          const body = await resp.json();
+          if (body && Array.isArray(body.files)) {
+            for (const file of body.files) {
+              const url = file.presigned_url || file.url || file.presignedUrl;
+              const rawFilename = file.key ? file.key.split('/').pop() : 'unnamed.jpg';
+              if (url) {
+                fileList.push({ url, filename: `${folder.name}/${rawFilename}` });
+              }
             }
           }
+        } catch (err) {
+          console.error('Error listing folder', folder.path, err);
         }
-      } catch (err) {
-        console.error('Error listing folder', folder.path, err);
       }
-    }
 
-    if (fileList.length === 0) {
-      addNotification('No downloadable files found for selection', 'error');
-      return;
-    }
+      if (fileList.length === 0) {
+        addNotification('No downloadable files found for selection', 'error');
+        return;
+      }
 
-    const zipName = `${(currentPath && currentPath !== '/' ? currentPath.replace(/^\//, '').replace(/\//g, '_') : 'gallery') || 'gallery'}_${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
-    addNotification(`Preparing ${fileList.length} file(s) into ${zipName}`, 'info');
-    await createZipAndDownload(fileList, zipName);
+      const zipName = `${(currentPath && currentPath !== '/' ? currentPath.replace(/^\//, '').replace(/\//g, '_') : 'gallery') || 'gallery'}_${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+      addNotification(`Preparing ${fileList.length} file(s) into ${zipName}`, 'info');
+      await createZipAndDownload(fileList, zipName);
+    } catch (err: any) {
+      addNotification(`Bulk download failed: ${err.message}`, 'error');
+    } finally {
+      setBulkDownloadLoading(false);
+    }
   };
 
   // -------------------- Share helpers --------------------
@@ -590,8 +622,9 @@ const handleShare = async () => {
     return;
   }
 
+  setShareLoading(true);
+  addNotification('Generating share link(s)...', 'info');
   try {
-    addNotification('Generating share link(s)...', 'info');
     const links = await generateShareableLinks(selectedItems);
 
     if (links.length === 0) {
@@ -613,6 +646,8 @@ const handleShare = async () => {
     addNotification(`Share failed: ${message}`, 'error');
     setError(`Share failed: ${message}`);
     setShareModal({ isOpen: true, links: [], serverMessage: message });
+  } finally {
+    setShareLoading(false);
   }
 };
 
@@ -649,6 +684,8 @@ const generateShareableLinks = async (forItemIds: string[]) => {
 
 // (Optional) Updated handleShareSingle if you want files to use /shared-images format
 const handleShareSingle = async (item: GalleryItem) => {
+  setShareLoading(true);
+  addNotification('Generating share link...', 'info');
   try {
     const baseUrl = window.location.origin || 'http://localhost:5173';
     const path = item.key || item.id;
@@ -659,6 +696,8 @@ const handleShareSingle = async (item: GalleryItem) => {
     console.error('Share single failed:', err);
     addNotification(`Share failed: ${err.message}`, 'error');
     setShareModal({ isOpen: true, links: [], serverMessage: err.message });
+  } finally {
+    setShareLoading(false);
   }
 };
   // -------------------- Filters & sorting (unchanged logic from original) --------------------
@@ -899,6 +938,8 @@ const handleShareSingle = async (item: GalleryItem) => {
 
   // Handle showing image list for client selection folders
   const handleShowImageList = async (folderPath: string, folderName: string) => {
+    setImageListLoading(true);
+    addNotification('Loading image list...', 'info');
     try {
       // Check if this is a client selection folder
       if (!folderPath.includes('client') && !folderPath.includes('selection')) {
@@ -906,8 +947,6 @@ const handleShareSingle = async (item: GalleryItem) => {
         return;
       }
 
-      addNotification('Loading image list...', 'info');
-      
       let prefix = folderPath;
       if (prefix.startsWith('/')) prefix = prefix.slice(1);
       if (!prefix.endsWith('/')) prefix += '/';
@@ -945,10 +984,11 @@ const handleShareSingle = async (item: GalleryItem) => {
         folderName: folderName,
         images: imageNames
       });
-
     } catch (err: any) {
       console.error('Error fetching image list:', err);
       addNotification(`Failed to load image list: ${err.message}`, 'error');
+    } finally {
+      setImageListLoading(false);
     }
   };
 
@@ -1010,6 +1050,8 @@ const handleShareSingle = async (item: GalleryItem) => {
       return;
     }
 
+    setCreateFolderLoading(true);
+    addNotification('Creating folder...', 'info');
     try {
       let prefix = currentPath;
       if (prefix && !prefix.endsWith('/')) prefix += '/';
@@ -1045,6 +1087,8 @@ const handleShareSingle = async (item: GalleryItem) => {
       console.error('Error creating folder:', err);
       setError(`Failed to create folder: ${err.message}`);
       addNotification(`Failed to create folder: ${err.message}`, 'error');
+    } finally {
+      setCreateFolderLoading(false);
     }
   };
 
@@ -1071,6 +1115,91 @@ const handleShareSingle = async (item: GalleryItem) => {
     startUpload(newFiles);
   };
 
+  // Helper to upload a single file using XMLHttpRequest for progress tracking
+  const uploadFileWithXHR = (fileUpload: UploadFile, presignedUrl: PresignedUpload): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', presignedUrl.url, true);
+      xhr.setRequestHeader('Content-Type', fileUpload.file.type);
+
+      // Track progress
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          setUploadFiles((prev) =>
+            prev.map((f) => (f.id === fileUpload.id ? { ...f, progress: percentComplete } : f))
+          );
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploadFiles((prev) =>
+            prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'completed', progress: 100 } : f))
+          );
+          resolve();
+        } else {
+          const error = new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`);
+          setUploadFiles((prev) =>
+            prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'error', error: error.message } : f))
+          );
+          reject(error);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        const error = new Error('Network error during upload');
+        setUploadFiles((prev) =>
+          prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'error', error: error.message } : f))
+        );
+        reject(error);
+      });
+
+      xhr.addEventListener('abort', () => {
+        const error = new Error('Upload aborted');
+        setUploadFiles((prev) =>
+          prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'error', error: error.message } : f))
+        );
+        reject(error);
+      });
+
+      // Start upload
+      setUploadFiles((prev) =>
+        prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'uploading', progress: 0 } : f))
+      );
+      xhr.send(fileUpload.file);
+    });
+  };
+
+  // Helper to process a batch of uploads with concurrency limit
+  const processUploadBatch = async (batchFiles: UploadFile[], presignedUrls: PresignedUpload[]) => {
+    const uploadPromises: Promise<void>[] = [];
+    for (let i = 0; i < batchFiles.length; i++) {
+      const fileUpload = batchFiles[i];
+      const presigned = presignedUrls[i];
+      if (!presigned) {
+        console.warn(`No presigned URL for ${fileUpload.file.name}`);
+        setUploadFiles((prev) =>
+          prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'error', error: 'No presigned URL' } : f))
+        );
+        continue;
+      }
+
+      uploadPromises.push(uploadFileWithXHR(fileUpload, presigned));
+
+      // Limit concurrency
+      if (uploadPromises.length >= MAX_CONCURRENT_UPLOADS || i === batchFiles.length - 1) {
+        try {
+          await Promise.all(uploadPromises);
+        } catch (err) {
+          console.error('Some uploads in batch failed:', err);
+          // Continue with next batch even if some fail
+        }
+        uploadPromises.length = 0; // Clear for next set
+      }
+    }
+  };
+
   const startUpload = async (filesToUpload: UploadFile[]) => {
     if (filesToUpload.length === 0) return;
 
@@ -1081,117 +1210,101 @@ const handleShareSingle = async (item: GalleryItem) => {
       if (prefix === '/') prefix = '';
 
       const displayPath = prefix || 'root';
-      console.log(`Uploading to path: ${displayPath}`);
+      console.log(`Uploading to path: ${displayPath} (${filesToUpload.length} files)`);
 
       addNotification(
         `Starting upload of ${filesToUpload.length} file(s) to ${displayPath}`,
         'info'
       );
 
-      // Call Lambda to get presigned URLs
-      const response = await fetch('https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: filesToUpload.map((f) => f.file.name),
-          folder: prefix,
-        }),
-        mode: 'cors',
-      });
-
-      console.log('Lambda request body:', JSON.stringify({
-        files: filesToUpload.map((f) => f.file.name),
-        folder: prefix,
-      }));
-
-      if (!response.ok) {
-        throw new Error(`Failed to get presigned URLs: ${response.status} ${response.statusText}`);
+      // Split into batches for presigned URLs
+      const batches: UploadFile[][] = [];
+      for (let i = 0; i < filesToUpload.length; i += PRESIGNED_BATCH_SIZE) {
+        batches.push(filesToUpload.slice(i, i + PRESIGNED_BATCH_SIZE));
       }
 
-      const data = await response.json();
-      console.log('Lambda response:', JSON.stringify(data, null, 2));
+      const allPresignedUrls: PresignedUpload[] = [];
 
-      if (!data.success || !data.uploads || !Array.isArray(data.uploads)) {
-        throw new Error(data.message || 'Invalid Lambda response format');
-      }
+      // Get presigned URLs for each batch sequentially (to avoid overwhelming the lambda)
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const batchFileNames = batch.map((f) => f.file.name);
 
-      // Filter valid uploads
-      const presignedUrls = data.uploads.filter((upload: any) => {
-        if (!upload.url || !upload.key) {
-          console.warn('Skipping invalid upload entry:', JSON.stringify(upload, null, 2));
-          addNotification(`Skipping invalid upload entry for file: ${upload.key || 'unknown'}`, 'error');
-          return false;
-        }
-        if (Object.keys(upload).length > 2) {
-          console.warn('Unexpected fields in upload entry:', Object.keys(upload));
-        }
-        return true;
-      });
-
-      // Verify expected keys
-      const expectedKeys = filesToUpload.map((f) => `${prefix}${f.file.name}`);
-      const receivedKeys = presignedUrls.map((u: any) => u.key);
-      console.log('Expected S3 keys:', expectedKeys);
-      console.log('Received S3 keys:', receivedKeys);
-
-      if (presignedUrls.length !== filesToUpload.length) {
-        console.warn(`Expected ${filesToUpload.length} presigned URLs, got ${presignedUrls.length}`);
-        addNotification(`Warning: Received ${presignedUrls.length} valid URLs out of ${filesToUpload.length} requested`, 'info');
-      }
-
-      if (presignedUrls.length === 0) {
-        throw new Error('No valid presigned URLs received');
-      }
-
-      // Upload each file using presigned URLs
-      const failedUploads: string[] = [];
-      for (let i = 0; i < Math.min(filesToUpload.length, presignedUrls.length); i++) {
-        const file = filesToUpload[i];
-        const { url, key } = presignedUrls[i];
-
-        console.log(`Uploading file: ${file.file.name} to S3 key: ${key}`);
-        console.log(`Presigned URL: ${url}`);
-
-        setUploadFiles((prev) =>
-          prev.map((f) => (f.id === file.id ? { ...f, status: 'uploading', progress: 0 } : f))
+        addNotification(
+          `Requesting presigned URLs for batch ${batchIndex + 1}/${batches.length} (${batch.length} files)...`,
+          'info'
         );
 
-        try {
-          const uploadResponse = await fetch(url, {
-            method: 'PUT',
-            body: file.file,
-            headers: { 'Content-Type': file.file.type },
-            // don't set mode:'no-cors' - that would make response opaque and success-check impossible
-          });
+        const response = await fetch('https://e16ufjl300.execute-api.eu-north-1.amazonaws.com/default/bulkupload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: batchFileNames,
+            folder: prefix,
+          }),
+          mode: 'cors',
+        });
 
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            let errorMessage = `Failed to upload ${file.file.name}: ${uploadResponse.status} ${uploadResponse.statusText}`;
-            if (uploadResponse.status === 403) {
-              errorMessage += ' - Check S3 permissions or Content-Type mismatch';
-            }
-            throw new Error(`${errorMessage} - ${errorText}`);
-          }
+        console.log(`Batch ${batchIndex + 1} Lambda request body:`, JSON.stringify({
+          files: batchFileNames,
+          folder: prefix,
+        }));
 
-          setUploadFiles((prev) =>
-            prev.map((f) => (f.id === file.id ? { ...f, status: 'completed', progress: 100 } : f))
-          );
-        } catch (err: any) {
-          console.error(`Upload failed for ${file.file.name}:`, err);
-          failedUploads.push(file.file.name);
-          setUploadFiles((prev) =>
-            prev.map((f) => (f.id === file.id ? { ...f, status: 'error', error: err.message } : f))
-          );
+        if (!response.ok) {
+          throw new Error(`Failed to get presigned URLs for batch ${batchIndex + 1}: ${response.status} ${response.statusText}`);
         }
+
+        const data = await response.json();
+        console.log(`Batch ${batchIndex + 1} Lambda response:`, JSON.stringify(data, null, 2));
+
+        if (!data.success || !data.uploads || !Array.isArray(data.uploads)) {
+          throw new Error(data.message || `Invalid Lambda response format for batch ${batchIndex + 1}`);
+        }
+
+        // Filter valid uploads
+        const batchPresignedUrls = data.uploads.filter((upload: any): upload is PresignedUpload => {
+          if (!upload.url || !upload.key) {
+            console.warn('Skipping invalid upload entry:', JSON.stringify(upload, null, 2));
+            addNotification(`Skipping invalid upload entry for file: ${upload.key || 'unknown'}`, 'error');
+            return false;
+          }
+          if (Object.keys(upload).length > 2) {
+            console.warn('Unexpected fields in upload entry:', Object.keys(upload));
+          }
+          return true;
+        });
+
+        if (batchPresignedUrls.length !== batch.length) {
+          console.warn(`Batch ${batchIndex + 1}: Expected ${batch.length} presigned URLs, got ${batchPresignedUrls.length}`);
+          addNotification(`Warning: Batch ${batchIndex + 1} received ${batchPresignedUrls.length} valid URLs out of ${batch.length} requested`, 'info');
+        }
+
+        allPresignedUrls.push(...batchPresignedUrls);
       }
 
+      if (allPresignedUrls.length === 0) {
+        throw new Error('No valid presigned URLs received across all batches');
+      }
+
+      // Now process uploads in batches with concurrency
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batchFiles = batches[batchIndex];
+        const batchPresignedUrls = allPresignedUrls.slice(
+          batchIndex * PRESIGNED_BATCH_SIZE,
+          (batchIndex + 1) * PRESIGNED_BATCH_SIZE
+        );
+        await processUploadBatch(batchFiles, batchPresignedUrls);
+      }
+
+      // Check for any remaining errors
+      const failedUploads = filesToUpload.filter(f => f.status === 'error');
       if (failedUploads.length > 0) {
-        throw new Error(`Failed to upload ${failedUploads.length} file(s): ${failedUploads.join(', ')}`);
+        throw new Error(`Failed to upload ${failedUploads.length} file(s): ${failedUploads.map(f => f.file.name).join(', ')}`);
       }
 
       fetchGalleryItems();
       setUploadFiles([]);
-      addNotification(`Successfully uploaded ${presignedUrls.length} file(s) to ${displayPath}`, 'success');
+      addNotification(`Successfully uploaded ${allPresignedUrls.length} file(s) to ${displayPath}`, 'success');
     } catch (error: any) {
       console.error('Upload error:', error);
       setUploadFiles((prev) =>
@@ -1284,13 +1397,15 @@ const handleShareSingle = async (item: GalleryItem) => {
                 <button
                   onClick={() => setCreateFolderModal(true)}
                   className="flex items-center px-4 py-2 bg-[#00BCEB] text-white rounded-lg font-medium hover:bg-[#00A5CF] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  disabled={createFolderLoading}
                 >
                   <FolderPlus className="h-4 w-4 mr-2" />
                   Create Folder
+                  {createFolderLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Upload New
@@ -1408,9 +1523,11 @@ const handleShareSingle = async (item: GalleryItem) => {
                             }
                           }}
                           className="flex items-center px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm"
+                          disabled={imageListLoading}
                         >
                           <Eye className="w-4 h-4 inline mr-1" />
                           View Image List
+                          {imageListLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                         </button>
                       )}
                       
@@ -1428,16 +1545,20 @@ const handleShareSingle = async (item: GalleryItem) => {
                       <button
                         onClick={handleBulkDownload}
                         className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 text-sm"
+                        disabled={bulkDownloadLoading}
                       >
                         <Download className="w-4 h-4 inline mr-1" />
                         Download
+                        {bulkDownloadLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                       </button>
                       <button
                         onClick={handleShare}
                         className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg hover:bg-[#e55a00] transition-colors duration-200 text-sm"
+                        disabled={shareLoading}
                       >
                         <Share2 className="w-4 h-4 inline mr-1" />
                         Share
+                        {shareLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                       </button>
                       <button
                         onClick={handleBulkDelete}
@@ -1791,7 +1912,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                     </button>
                     <button
                       onClick={() => handleShareSingle(previewModal.currentImage!)}
-                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
+                      className="px-3 py-1.5 bg[#FF6B00] text-white rounded-lg text-sm"
                     >
                       <Share2 className="w-4 h-4 inline mr-1" />
                       Share
@@ -1902,20 +2023,24 @@ const handleShareSingle = async (item: GalleryItem) => {
                     onChange={(e) => setNewFolderName(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
                     placeholder="Enter folder name"
+                    disabled={createFolderLoading}
                   />
                 </div>
                 <div className="flex justify-end space-x-2">
                   <button
                     onClick={() => setCreateFolderModal(false)}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                    disabled={createFolderLoading}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateFolder}
-                    className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
+                    className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] flex items-center"
+                    disabled={createFolderLoading}
                   >
                     Create
+                    {createFolderLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                   </button>
                 </div>
               </div>
@@ -1952,7 +2077,11 @@ const handleShareSingle = async (item: GalleryItem) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
-                  {imageListModal.images.length === 0 ? (
+                  {imageListLoading ? (
+                    <div className="flex items-center justify-center h-32">
+                      <Loader2 className="h-8 w-8 text-[#00BCEB] animate-spin" />
+                    </div>
+                  ) : imageListModal.images.length === 0 ? (
                     <div className="flex items-center justify-center h-32 text-gray-500">
                       <div className="text-center">
                         <Image className="h-8 w-8 mx-auto mb-2 text-gray-400" />

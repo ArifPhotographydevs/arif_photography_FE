@@ -1,13 +1,13 @@
 // ProposalCreate.tsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  ArrowRight, 
-  Plus, 
-  X, 
-  Upload, 
-  FileText, 
+import {
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  X,
+  Upload,
+  FileText,
   Send,
   User,
   Camera,
@@ -38,7 +38,7 @@ interface ServiceProvided {
 }
 
 interface AddOn {
-  id:string;
+  id: string;
   name: string;
   price: number;
   selected: boolean;
@@ -46,7 +46,7 @@ interface AddOn {
 
 interface ProposalData {
   clientName: string;
-  recipientEmail: string; 
+  recipientEmail: string;
   shootType: string;
   eventDate: string;
   venue: string;
@@ -62,7 +62,7 @@ interface ProposalData {
 
 // --- DEFAULT / EMPTY PROPOSAL TEMPLATE ---
 const emptyProposalTemplate: ProposalData = {
-  clientName: '', 
+  clientName: '',
   recipientEmail: '',
   shootType: '',
   eventDate: '',
@@ -88,14 +88,13 @@ const emptyProposalTemplate: ProposalData = {
   footerNote: ''
 };
 
-// --- Endpoint constants (update if your endpoints differ) ---
+// --- Endpoint constants ---
 const GET_LEADS_URL = 'https://sk8wa56suc.execute-api.eu-north-1.amazonaws.com/GetAllLeads';
 const GET_PROPOSALS_URL = 'https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData';
 const POST_PROPOSAL_URL = 'https://cazwal3zzj.execute-api.eu-north-1.amazonaws.com/PostProposalData';
 const SENDMAIL_URL = 'https://gqem8o7aw1.execute-api.eu-north-1.amazonaws.com/default/Sendmail';
 
 function ProposalCreate() {
-  // Accept either :leadId (existing) or :proposalId (from proposals list)
   const { leadId, proposalId } = useParams<{ leadId?: string; proposalId?: string }>();
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -108,20 +107,18 @@ function ProposalCreate() {
 
   const [proposalData, setProposalData] = useState<ProposalData>({ ...emptyProposalTemplate });
 
-  // --- Fetching: if proposalId provided => fetch proposals and find by id, else fallback to lead fetch
+  // --- Fetch initial data (proposalId or leadId) ---
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       setError(null);
 
-      // Helper: set to empty template
       const initEmpty = () => {
         setProposalData({ ...emptyProposalTemplate });
         setLogoPreview(null);
       };
 
       try {
-        // If a proposalId is present in URL, try to load that proposal first
         if (proposalId) {
           const res = await fetch(GET_PROPOSALS_URL);
           if (!res.ok) {
@@ -134,7 +131,6 @@ function ProposalCreate() {
           const arr = Array.isArray(data) ? data : (data.proposals || []);
           const matched = arr.find((p: any) => String(p.proposalId) === String(proposalId));
           if (matched) {
-            // Map matched proposal to ProposalData structure
             const mappedEvents: Event[] = Array.isArray(matched.events) && matched.events.length
               ? matched.events.map((e: any, idx: number) => ({
                   id: e.id?.toString?.() || `evt-${idx}`,
@@ -180,7 +176,6 @@ function ProposalCreate() {
               footerNote: matched.footerNote || matched.footer || ''
             });
 
-            // if the matched proposal contains a logo url or base64, we could set logoPreview here (optional)
             if (matched.logo || matched.logoUrl || (matched.logos && matched.logos[0])) {
               const candidate = matched.logoUrl || matched.logo || (matched.logos && matched.logos[0]);
               if (typeof candidate === 'string') setLogoPreview(candidate);
@@ -190,11 +185,9 @@ function ProposalCreate() {
             return;
           } else {
             console.info(`Proposal with ID "${proposalId}" not found. Falling back to lead fetch or empty form.`);
-            // proceed to check leadId below (if provided), else empty
           }
         }
 
-        // If leadId present (or proposalId not found), try fetching lead data (existing logic)
         if (leadId) {
           try {
             const response = await fetch(GET_LEADS_URL);
@@ -216,7 +209,7 @@ function ProposalCreate() {
                 const eventDate = primaryEvent?.date ? new Date(primaryEvent.date).toISOString().split('T')[0] : '';
                 const recipientEmail = matchedLead.personalInfo?.email || '';
 
-                setProposalData(prev => ({ 
+                setProposalData(prev => ({
                   ...prev,
                   clientName,
                   shootType,
@@ -237,7 +230,7 @@ function ProposalCreate() {
               setLoading(false);
               return;
             }
-          } catch (leadErr:any) {
+          } catch (leadErr: any) {
             console.error('Error fetching lead for proposal:', leadErr);
             initEmpty();
             setLoading(false);
@@ -245,9 +238,9 @@ function ProposalCreate() {
           }
         }
 
-        // If neither proposalId nor leadId produced data -> initialize empty (editable)
+        // default: empty
         initEmpty();
-      } catch (err:any) {
+      } catch (err: any) {
         console.error('Error while fetching initial data for ProposalCreate:', err);
         setError('Failed to load initial data. You can still create a proposal manually.');
         setProposalData({ ...emptyProposalTemplate });
@@ -263,6 +256,7 @@ function ProposalCreate() {
   const handleInputChange = (field: keyof ProposalData, value: any) => {
     setProposalData(prev => ({ ...prev, [field]: value }));
   };
+
   const handleEventChange = (eventId: string, field: keyof Event, value: any) => {
     setProposalData(prev => ({
       ...prev,
@@ -271,6 +265,7 @@ function ProposalCreate() {
       )
     }));
   };
+
   const addEvent = () => {
     const newEvent: Event = {
       id: Date.now().toString(),
@@ -281,9 +276,11 @@ function ProposalCreate() {
     };
     setProposalData(prev => ({ ...prev, events: [...prev.events, newEvent] }));
   };
+
   const removeEvent = (eventId: string) => {
     setProposalData(prev => ({ ...prev, events: prev.events.filter(e => e.id !== eventId) }));
   };
+
   const handleServiceProvidedChange = (serviceId: string, field: keyof ServiceProvided, value: any) => {
     setProposalData(prev => ({
       ...prev,
@@ -292,6 +289,7 @@ function ProposalCreate() {
       )
     }));
   };
+
   const addServiceProvided = () => {
     const newService: ServiceProvided = {
       id: Date.now().toString(),
@@ -300,12 +298,15 @@ function ProposalCreate() {
     };
     setProposalData(prev => ({ ...prev, servicesProvided: [...prev.servicesProvided, newService] }));
   };
+
   const removeServiceProvided = (serviceId: string) => {
     setProposalData(prev => ({ ...prev, servicesProvided: prev.servicesProvided.filter(s => s.id !== serviceId) }));
   };
+
   const toggleAddOn = (addOnId: string) => {
     setProposalData(prev => ({ ...prev, addOns: prev.addOns.map(a => a.id === addOnId ? { ...a, selected: !a.selected } : a) }));
   };
+
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -315,17 +316,24 @@ function ProposalCreate() {
       reader.readAsDataURL(file);
     }
   };
+
   const calculateSubtotal = () => {
     const addOnsTotal = proposalData.addOns.filter(a => a.selected).reduce((t, a) => t + a.price, 0);
     return proposalData.totalPrice + addOnsTotal;
   };
+
   const calculateTotal = () => {
     return calculateSubtotal();
   };
-  const nextStep = () => currentStep < 5 && setCurrentStep(currentStep + 1);
-  const prevStep = () => currentStep > 1 && setCurrentStep(currentStep - 1);
 
-  // --- handleSendProposal uses your existing PostProposalData then calls backend to send email ---
+  const nextStep = () => {
+    if (currentStep < 4) setCurrentStep(prev => prev + 1);
+  };
+  const prevStep = () => {
+    if (currentStep > 1) setCurrentStep(prev => prev - 1);
+  };
+
+  // --- handleSendProposal ---
   const handleSendProposal = async () => {
     const recipient = (proposalData.recipientEmail || '').trim();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -340,7 +348,6 @@ function ProposalCreate() {
 
     setIsSubmitting(true);
     try {
-      // prepare logo as base64 (if any)
       let base64Logo: string | undefined;
       if (proposalData.logo) {
         base64Logo = await new Promise<string>((resolve, reject) => {
@@ -362,7 +369,6 @@ function ProposalCreate() {
         total: calculateTotal()
       };
 
-      // 1) POST to your existing save-proposal API (keeps original behavior)
       const response = await fetch(POST_PROPOSAL_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -375,12 +381,8 @@ function ProposalCreate() {
       }
 
       const newProposalId = result.proposalId;
-      console.log(`Proposal created successfully with ID: ${newProposalId}`);
-
-      // 2) Call backend to send email (Lambda / API Gateway)
       const proposalLink = `https://arif-photography-fe.vercel.app/proposals/view/${newProposalId}`;
 
-      // Build email payload that backend expects (include proposalLink)
       const emailPayload = {
         to: recipient,
         subject: `Proposal from ${proposalData.clientName || 'Client'} — #${newProposalId}`,
@@ -395,19 +397,17 @@ function ProposalCreate() {
         proposalLink
       };
 
-      // Adjust this endpoint to your deployed Sendmail Lambda / API Gateway URL
       const sendResponse = await fetch(SENDMAIL_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(emailPayload)
       });
 
-      // Parse response safely
       let sendResult: any = { success: sendResponse.ok };
       try {
         sendResult = await sendResponse.json();
       } catch (err) {
-        // ignore parse error, keep sendResult.success from status
+        // keep sendResult.success
       }
 
       if (!sendResponse.ok || !sendResult.success) {
@@ -417,7 +417,6 @@ function ProposalCreate() {
         alert('Proposal saved and email sent successfully!');
       }
 
-      // navigate back to lead
       navigate(`/leads/${leadId}`);
     } catch (error: any) {
       console.error('Error sending proposal:', error);
@@ -430,9 +429,8 @@ function ProposalCreate() {
   const isStepValid = (step: number) => {
     switch (step) {
       case 1: return Boolean(proposalData.clientName);
-      case 2: return proposalData.events.every(e => e.eventTitle);
-      case 3: return proposalData.servicesProvided.every(s => s.name);
-      case 4: return proposalData.termsTemplate !== '';
+      case 2: return proposalData.events.every(e => e.eventTitle) && proposalData.servicesProvided.every(s => s.name);
+      case 3: return proposalData.termsTemplate !== '';
       default: return true;
     }
   };
@@ -454,11 +452,11 @@ function ProposalCreate() {
           <h2 className="text-xl font-semibold text-red-700 mb-2">Loading Failed</h2>
           <p className="text-red-600 mb-6">{error}</p>
           <button
-              onClick={() => navigate('/leads')}
-              className="flex items-center mx-auto px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
+            onClick={() => navigate('/leads')}
+            className="flex items-center mx-auto px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
           >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Leads List
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Leads List
           </button>
         </div>
       </div>
@@ -485,13 +483,12 @@ function ProposalCreate() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
               <h1 className="text-2xl font-bold text-[#2D2D2D] mb-4">Create New Proposal</h1>
               <div className="flex items-center space-x-4">
-                {[1,2,3,4,5].map((num) => {
+                {[1,2,3,4].map((num) => {
                   const step = [
                     { number: 1, title: 'Basic Info' },
-                    { number: 2, title: 'Events' },
-                    { number: 3, title: 'Services Provided' },
-                    { number: 4, title: 'Terms & Branding' },
-                    { number: 5, title: 'Preview & Send' }
+                    { number: 2, title: 'Events & Services' },
+                    { number: 3, title: 'Terms & Branding' },
+                    { number: 4, title: 'Preview & Send' }
                   ].find(s => s.number === num)!;
                   return (
                     <div key={step.number} className="flex items-center">
@@ -499,7 +496,7 @@ function ProposalCreate() {
                         {currentStep > step.number ? <Check className="h-4 w-4" /> : step.number}
                       </div>
                       <span className={`ml-2 text-sm font-medium ${currentStep >= step.number ? 'text-[#2D2D2D]' : 'text-gray-500'}`}>{step.title}</span>
-                      {step.number < 5 && <div className={`w-12 h-0.5 mx-4 ${currentStep > step.number ? 'bg-green-500' : 'bg-gray-200'}`} />}
+                      {step.number < 4 && <div className={`w-12 h-0.5 mx-4 ${currentStep > step.number ? 'bg-green-500' : 'bg-gray-200'}`} />}
                     </div>
                   );
                 })}
@@ -557,20 +554,29 @@ function ProposalCreate() {
                 </div>
               )}
 
-              {/* STEP 2 - Events */}
+              {/* STEP 2 - Events & Services */}
               {currentStep === 2 && (
                 <div className="space-y-6">
-                  <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Event Details</h2>
+                  <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Event & Services Details</h2>
+
+                  {/* Events */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-medium text-[#2D2D2D]">Events</h3>
-                      <button onClick={addEvent} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00]"><Plus className="h-4 w-4 mr-2" />Add Event</button>
+                      <button onClick={addEvent} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00]">
+                        <Plus className="h-4 w-4 mr-2" />Add Event
+                      </button>
                     </div>
+
                     {proposalData.events.map((event, index) => (
                       <div key={event.id} className="bg-gray-50 rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium text-[#2D2D2D]">Event {index + 1}</h4>
-                          {proposalData.events.length > 1 && <button onClick={() => removeEvent(event.id)} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>}
+                          {proposalData.events.length > 1 && (
+                            <button onClick={() => removeEvent(event.id)} className="text-red-500 hover:text-red-700">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div>
@@ -593,23 +599,25 @@ function ProposalCreate() {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
 
-              {/* STEP 3 - Services Provided */}
-              {currentStep === 3 && (
-                <div className="space-y-6">
-                  <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Services Provided</h2>
+                  {/* Services Provided */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-medium text-[#2D2D2D]">Services</h3>
-                      <button onClick={addServiceProvided} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00]"><Plus className="h-4 w-4 mr-2" />Add Service</button>
+                      <button onClick={addServiceProvided} className="flex items-center px-3 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00]">
+                        <Plus className="h-4 w-4 mr-2" />Add Service
+                      </button>
                     </div>
+
                     {proposalData.servicesProvided.map((service, index) => (
                       <div key={service.id} className="bg-gray-50 rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium text-[#2D2D2D]">Service {index + 1}</h4>
-                          {proposalData.servicesProvided.length > 1 && <button onClick={() => removeServiceProvided(service.id)} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>}
+                          {proposalData.servicesProvided.length > 1 && (
+                            <button onClick={() => removeServiceProvided(service.id)} className="text-red-500 hover:text-red-700">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div>
@@ -637,52 +645,53 @@ function ProposalCreate() {
                         </div>
                       </div>
                     ))}
-                  </div>
 
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-[#2D2D2D]">Total Package Price</h3>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><DollarSign className="h-4 w-4 text-gray-400" /></div>
-                      <input 
-                        type="number" 
-                        min="0" 
-                        value={proposalData.totalPrice} 
-                        onChange={(e) => handleInputChange('totalPrice', parseInt(e.target.value) || 0)} 
-                        className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg" 
-                        placeholder="Enter total package price"
-                      />
+                    {/* Price / Add-ons / Summary */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-medium text-[#2D2D2D]">Total Package Price</h3>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><DollarSign className="h-4 w-4 text-gray-400" /></div>
+                        <input 
+                          type="number" 
+                          min="0" 
+                          value={proposalData.totalPrice} 
+                          onChange={(e) => handleInputChange('totalPrice', parseInt(e.target.value) || 0)} 
+                          className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg" 
+                          placeholder="Enter total package price"
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-[#2D2D2D]">Optional Add-ons</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {proposalData.addOns.map((addOn) => (
-                        <div key={addOn.id} className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${addOn.selected ? 'border-[#00BCEB] bg-[#00BCEB]/5' : 'border-gray-200 hover:border-[#00BCEB]/50'}`} onClick={() => toggleAddOn(addOn.id)}>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium text-[#2D2D2D]">{addOn.name}</p>
-                              <p className="text-sm text-gray-600">₹{addOn.price.toLocaleString()}</p>
-                            </div>
-                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${addOn.selected ? 'border-[#00BCEB] bg-[#00BCEB]' : 'border-gray-300'}`}>
-                              {addOn.selected && <Check className="h-3 w-3 text-white" />}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-medium text-[#2D2D2D]">Optional Add-ons</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {proposalData.addOns.map((addOn) => (
+                          <div key={addOn.id} className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${addOn.selected ? 'border-[#00BCEB] bg-[#00BCEB]/5' : 'border-gray-200 hover:border-[#00BCEB]/50'}`} onClick={() => toggleAddOn(addOn.id)}>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-[#2D2D2D]">{addOn.name}</p>
+                                <p className="text-sm text-gray-600">₹{addOn.price.toLocaleString()}</p>
+                              </div>
+                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${addOn.selected ? 'border-[#00BCEB] bg-[#00BCEB]' : 'border-gray-300'}`}>
+                                {addOn.selected && <Check className="h-3 w-3 text-white" />}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="bg-[#00BCEB]/5 rounded-lg p-4 space-y-2">
-                    <div className="flex justify-between text-[#2D2D2D]"><span>Package Price:</span><span>₹{proposalData.totalPrice.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-[#2D2D2D]"><span>Add-ons:</span><span>₹{proposalData.addOns.filter(a => a.selected).reduce((t, a) => t + a.price, 0).toLocaleString()}</span></div>
-                    <div className="flex justify-between text-lg font-semibold text-[#2D2D2D] pt-2 border-t border-[#00BCEB]/20"><span>Total:</span><span>₹{calculateTotal().toLocaleString()}</span></div>
+                    <div className="bg-[#00BCEB]/5 rounded-lg p-4 space-y-2">
+                      <div className="flex justify-between text-[#2D2D2D]"><span>Package Price:</span><span>₹{proposalData.totalPrice.toLocaleString()}</span></div>
+                      <div className="flex justify-between text-[#2D2D2D]"><span>Add-ons:</span><span>₹{proposalData.addOns.filter(a => a.selected).reduce((t, a) => t + a.price, 0).toLocaleString()}</span></div>
+                      <div className="flex justify-between text-lg font-semibold text-[#2D2D2D] pt-2 border-t border-[#00BCEB]/20"><span>Total:</span><span>₹{calculateTotal().toLocaleString()}</span></div>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* STEP 4 - Terms & Branding */}
-              {currentStep === 4 && (
+              {/* STEP 3 - Terms & Branding */}
+              {currentStep === 3 && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Terms & Branding</h2>
                   <div>
@@ -711,8 +720,10 @@ function ProposalCreate() {
                         <option value="standard">Photography Services Terms</option>
                       </select>
                     </div>
+
                     {proposalData.termsTemplate === 'standard' && (
                       <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm">
+                        {/* ... (terms content — same as before) */}
                         <h4 className="font-semibold mb-2">Photography Services Terms:</h4>
                         <div className="space-y-3 text-gray-700">
                           <div>
@@ -722,7 +733,6 @@ function ProposalCreate() {
                             <p><strong>Delivery Payment:</strong> 50% payment before the wedding Day, Remaining 5% at the Delivery Time and final 5% after the Album finalization.</p>
                             <p><em>NOTE: We will strictly deliver the data only after receiving 95% of the total amount.</em></p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Terms of Service</h5>
                             <p><strong>Travel Expense:</strong> You shall arrange for the travel, Food and accommodation of our shoot crew for all your events occurring in places away from our offices.</p>
@@ -731,34 +741,28 @@ function ProposalCreate() {
                             <p><strong>Data Safety:</strong> For Clients who don't collect deliverables within 60 days, we will not hold responsibility for the Data loss.</p>
                             <p><strong>Hard Drives:</strong> A Hard Disk must be provided by the clients.(2 Harddisks has to be provided to the Management Team)</p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Outfits – Best Choices</h5>
                             <p>Clients are advised to prepare 1/2 outfits for the session. (Optional: 3rd outfit based on photography & client requirements.)</p>
                             <p><em>Note: Excessive outfit changes or travel during the shoot may affect the flow and quality of photos. We aim to capture natural, professional moments without interruption.</em></p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Shoot Details – Locations</h5>
                             <p>Clients are responsible for securing access to chosen shoot locations. We are not liable for any closures or restrictions at the selected venues.</p>
                             <p><strong>Pre-Wedding Shoot Duration:</strong> Local shoots: 1-day shoot, Outstation shoots: 2–3 days (includes travel & shoot time)</p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Call Management</h5>
                             <p>In case we are unable to attend your call during client meetings or internal discussions, please feel free to drop us a message on WhatsApp. Our contact team will get back to you as soon as possible.</p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Shoot Timings & Waiting Policy</h5>
                             <p>Clients are requested to arrive at the scheduled shoot time. Waiting time: 15–30 minutes grace period. After 30 minutes, waiting charges will be applicable and added to the final bill.</p>
                           </div>
-                          
                           <div>
                             <h5 className="font-semibold">Video & Album Corrections</h5>
                             <p>Clients must request any corrections or changes within 1 week of receiving the final video or album draft. After this period, we will not be responsible for delayed correction requests, and additional charges will apply for any revisions made beyond the 1-week window.</p>
                           </div>
-                          
                           <div>
                             <p><em><strong>Note:</strong> We will Strictly adhere to providing only the Requirements listed above, without adding or including any additional elements beyond those specified.</em></p>
                           </div>
@@ -774,8 +778,8 @@ function ProposalCreate() {
                 </div>
               )}
 
-              {/* STEP 5 - Preview & Send */}
-              {currentStep === 5 && (
+              {/* STEP 4 - Preview & Send */}
+              {currentStep === 4 && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-semibold text-[#2D2D2D] mb-4">Preview & Send</h2>
                   <div className="bg-gray-50 rounded-lg p-6 max-h-96 overflow-y-auto">
@@ -848,13 +852,13 @@ function ProposalCreate() {
               {/* NAV */}
               <div className="flex items-center justify-between pt-6 border-t border-gray-200">
                 <button onClick={prevStep} disabled={currentStep === 1} className={`flex items-center px-4 py-2 rounded-lg font-medium ${currentStep === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-[#2D2D2D] hover:bg-gray-200'}`}><ArrowLeft className="h-4 w-4 mr-2" />Previous</button>
-                {currentStep < 5 ? (
+                {currentStep < 4 ? (
                   <button onClick={nextStep} disabled={!isStepValid(currentStep)} className={`flex items-center px-6 py-2 rounded-lg font-medium ${isStepValid(currentStep) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>Next<ArrowRight className="h-4 w-4 ml-2" /></button>
                 ) : (
                   <div className="flex items-center space-x-3">
-                    <button onClick={() => setCurrentStep(4)} className="px-4 py-2 bg-gray-100 text-[#2D2D2D] rounded-lg">Go Back</button>
-                    <button 
-                      onClick={handleSendProposal} 
+                    <button onClick={() => setCurrentStep(3)} className="px-4 py-2 bg-gray-100 text-[#2D2D2D] rounded-lg">Go Back</button>
+                    <button
+                      onClick={handleSendProposal}
                       disabled={isSubmitting || !proposalData.recipientEmail}
                       title={!proposalData.recipientEmail ? "Cannot send proposal: Recipient email is missing." : "Send Proposal"}
                       className={`flex items-center px-6 py-2 rounded-lg font-medium ${(!isSubmitting && proposalData.recipientEmail) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
