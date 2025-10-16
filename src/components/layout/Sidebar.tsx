@@ -34,8 +34,8 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: 'Proposals', icon: FileText, path: '/proposals' },
     // { name: 'Finance', icon: DollarSign, path: '/finance' },
     { name: 'Team', icon: Users, path: '/team' },
-    // { name: 'Analytics', icon: BarChart3, path: '/analytics' },
-    // { name: 'Activity Logs', icon: Activity, path: '/activity-logs' },
+    { name: 'Invoice Generator', icon: BarChart3, path: '/analytics' },
+    { name: 'QR Generator', icon: Activity, path: '/activity-logs' },
     // { name: 'Settings', icon: Settings, path: '/settings' },
   ];
 
