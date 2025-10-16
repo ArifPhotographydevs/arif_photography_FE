@@ -52,6 +52,15 @@ interface Proposal {
   // NEW: change requests
   latestRevisionNote?: string;
   revisionHistory?: BackendHistory[];
+
+  // NEW: albums & events for prefill
+  albumsCount?: number;
+  albumSheets?: number;
+  events?: any[];
+
+  // NEW: packages
+  packageItems?: Array<{ id: string; name: string; selected: boolean; qty: number; unitPrice?: number }>;
+  complimentaryItems?: Array<{ id: string; name: string; selected: boolean; qty: number }>;
 }
 
 function normalizeLeadId(input?: string): string {
@@ -72,6 +81,7 @@ function Proposals() {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<{type:'success'|'error'; text:string} | null>(null);
+
 
   useEffect(() => {
     const fetchProposals = async () => {
@@ -100,8 +110,8 @@ function Proposals() {
             validUntil: item.validUntil || item.eventDate,
             sentDate: item.timestamp,
             services: Array.isArray(item.services) ? item.services.map((s: any) => ({
-              name: s.title,
-              price: Number(s.unitPrice || 0) * Number(s.quantity || 0)
+              name: s.title || s.name,
+              price: s.unitPrice != null && s.quantity != null ? Number(s.unitPrice || 0) * Number(s.quantity || 0) : Number(s.price || 0)
             })) : [],
             addOns: Array.isArray(item.addOns) ? item.addOns.filter((a: any) => a.selected).map((a: any) => ({
               name: a.name, price: Number(a.price || 0)
@@ -109,6 +119,15 @@ function Proposals() {
             notes: item.notes || '',
             latestRevisionNote: item.latestRevisionNote,
             revisionHistory: Array.isArray(item.revisionHistory) ? item.revisionHistory : undefined,
+            albumsCount: typeof item.albumsCount === 'number' ? item.albumsCount : Number(item.albumsCount || 0) || undefined,
+            albumSheets: typeof item.albumSheets === 'number' ? item.albumSheets : Number(item.albumSheets || 0) || undefined,
+            events: Array.isArray(item.events) ? item.events : undefined,
+            packageItems: Array.isArray(item.packageItems) ? item.packageItems.map((p: any) => ({
+              id: String(p.id), name: p.name, selected: !!p.selected, qty: Number(p.qty || 1), unitPrice: p.unitPrice != null ? Number(p.unitPrice) : undefined
+            })) : undefined,
+            complimentaryItems: Array.isArray(item.complimentaryItems) ? item.complimentaryItems.map((c: any) => ({
+              id: String(c.id), name: c.name, selected: !!c.selected, qty: Number(c.qty || 1)
+            })) : undefined,
           };
         });
 
@@ -180,8 +199,32 @@ function Proposals() {
 
   const handleViewProposal = (proposalId: string) => window.open(`/proposals/view/${proposalId}`, '_blank');
   const handleViewLead = (proposalId: string) => { window.location.href = `/proposals/create/${proposalId}`; };
-  const handleEditProposal = (proposalId: string) => { window.location.href = `/proposals/edit/${proposalId}`; };
+  const handleEditProposal = (proposal: Proposal) => { 
+    // Navigate to proposal creation page with the proposal data
+    const proposalData = encodeURIComponent(JSON.stringify({
+      id: proposal.proposalId,
+      clientName: proposal.clientName,
+      clientEmail: proposal.clientEmail,
+      clientPhone: proposal.clientPhone,
+      shootType: proposal.shootType,
+      eventDate: proposal.eventDate,
+      totalAmount: proposal.totalAmount,
+      status: proposal.status,
+      validUntil: proposal.validUntil,
+      notes: proposal.notes,
+      leadId: proposal.leadId,
+      services: proposal.services,
+      addOns: proposal.addOns,
+      albumsCount: proposal.albumsCount,
+      albumSheets: proposal.albumSheets,
+      events: proposal.events,
+      packageItems: proposal.packageItems,
+      complimentaryItems: proposal.complimentaryItems,
+    }));
+    window.location.href = `/proposals/create/${proposal.leadId}?edit=true&data=${proposalData}`;
+  };
   const handleDuplicateProposal = (proposalId: string) => { console.log('Duplicating proposal:', proposalId); };
+
 
   const formatCurrency = (amount: number) => `₹${(amount || 0).toLocaleString()}`;
 
@@ -433,12 +476,6 @@ function Proposals() {
                     return (
                       <React.Fragment key={proposal.id}>
                         <tr className="hover:bg-gray-50 transition-colors duration-200">
-                          {/* <td className="px-4 py-4 w-48">
-                            <div>
-                              <div className="text-sm font-medium text-[#2D2D2D] truncate">{proposal.proposalId}</div>
-                              <div className="text-sm text-gray-500 truncate">{proposal.shootType}</div>
-                            </div>
-                          </td> */}
                           <td className="px-4 py-4 w-64">
                             <div className="flex items-center">
                               <div className="w-8 h-8 bg-[#00BCEB]/10 rounded-full flex items-center justify-center flex-shrink-0">
@@ -513,15 +550,13 @@ function Proposals() {
                               >
                                 <Eye className="h-4 w-4" />
                               </button>
-                              {proposal.status === 'Draft' && (
-                                <button
-                                  onClick={() => handleEditProposal(proposal.id)}
-                                  className="p-1.5 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
-                                  title="Edit Proposal"
-                                >
-                                  <Edit3 className="h-4 w-4" />
-                                </button>
-                              )}
+                              <button
+                                onClick={() => handleEditProposal(proposal)}
+                                className="p-1.5 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
+                                title="Edit Proposal"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </button>
                               {isRequested && (
                                 <button
                                   onClick={() => setMessageOpenFor(proposal)}
@@ -668,7 +703,7 @@ function Proposals() {
                       </button>
                       {proposal.status === 'Draft' && (
                         <button
-                          onClick={() => handleEditProposal(proposal.id)}
+                          onClick={() => handleEditProposal(proposal)}
                           className="p-2 text-[#FF6B00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
                         >
                           <Edit3 className="h-4 w-4" />

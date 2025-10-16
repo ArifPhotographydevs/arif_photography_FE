@@ -1,6 +1,6 @@
 // src/pages/ProposalCreate.tsx
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
@@ -270,6 +270,7 @@ const presetSummary = (preset: ServicePreset) =>
 function ProposalCreate() {
   const { leadId, proposalId } = useParams<{ leadId?: string; proposalId?: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -290,6 +291,78 @@ function ProposalCreate() {
         setProposalData({ ...emptyProposalTemplate });
         setLogoPreview(null);
       };
+
+      // Check if we're in edit mode with data from URL
+      const isEditMode = searchParams.get('edit') === 'true';
+      const editDataParam = searchParams.get('data');
+      
+      if (isEditMode && editDataParam) {
+        try {
+          const editData = JSON.parse(decodeURIComponent(editDataParam));
+          console.log('Edit data received:', editData);
+          
+          // Pre-fill the form with edit data
+          setProposalData(prev => ({
+            ...prev,
+            clientName: editData.clientName || prev.clientName,
+            recipientEmail: editData.clientEmail || prev.recipientEmail,
+            shootType: editData.shootType || prev.shootType,
+            eventDate: editData.eventDate || prev.eventDate,
+            totalPrice: editData.totalAmount || prev.totalPrice,
+            notes: editData.notes || prev.notes,
+            // Map services and addOns if they exist
+            servicesProvided: editData.services ? editData.services.map((s: any, idx: number) => ({
+              id: `svc-${idx}`,
+              name: s.name || '',
+              count: 1
+            })) : prev.servicesProvided,
+            addOns: editData.addOns ? editData.addOns.map((a: any, idx: number) => ({
+              id: `addon-${idx}`,
+              name: a.name || '',
+              price: a.price || 0,
+              selected: true
+            })) : prev.addOns,
+            // NEW: albums meta
+            albumsCount: typeof editData.albumsCount === 'number' ? editData.albumsCount : (Number(editData.albumsCount) || prev.albumsCount),
+            albumSheets: typeof editData.albumSheets === 'number' ? editData.albumSheets : (Number(editData.albumSheets) || prev.albumSheets),
+            // NEW: events mapping
+            events: Array.isArray(editData.events) && editData.events.length ? editData.events.map((e: any, idx: number) => ({
+              id: e.id?.toString?.() || `evt-${idx}`,
+              eventTitle: e.eventTitle || e.title || '',
+              date: e.date || '',
+              time: e.time || '',
+              description: e.description || '',
+              services: Array.isArray(e.services)
+                ? e.services.map((s: any, sIdx: number) => ({
+                    id: s.id?.toString?.() || `svc-${idx}-${sIdx}`,
+                    name: s.name || '',
+                    count: Number(s.count || 1)
+                  }))
+                : []
+            })) : prev.events,
+            // NEW: packages mapping
+            packageItems: Array.isArray(editData.packageItems) ? editData.packageItems.map((p: any, idx: number) => ({
+              id: p.id?.toString?.() || `pkg-${idx}`,
+              name: p.name || '',
+              selected: !!p.selected,
+              qty: Number(p.qty || 1),
+              unitPrice: p.unitPrice != null ? Number(p.unitPrice) : undefined,
+            })) : prev.packageItems,
+            complimentaryItems: Array.isArray(editData.complimentaryItems) ? editData.complimentaryItems.map((c: any, idx: number) => ({
+              id: c.id?.toString?.() || `comp-${idx}`,
+              name: c.name || '',
+              selected: !!c.selected,
+              qty: Number(c.qty || 1),
+            })) : prev.complimentaryItems,
+          }));
+          
+          setLoading(false);
+          return;
+        } catch (error) {
+          console.error('Error parsing edit data:', error);
+          // Fall through to normal initialization
+        }
+      }
 
       try {
         if (proposalId) {
@@ -721,7 +794,10 @@ function ProposalCreate() {
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
       <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-        <Header title="Create Proposal" sidebarCollapsed={sidebarCollapsed} />
+        <Header 
+          title={searchParams.get('edit') === 'true' ? "Edit Proposal" : "Create Proposal"} 
+          sidebarCollapsed={sidebarCollapsed} 
+        />
 
         <main className="pt-16 p-6">
           <button
