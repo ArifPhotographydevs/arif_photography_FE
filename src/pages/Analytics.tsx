@@ -1,120 +1,86 @@
 import React, { useState } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
-import { FileText, DollarSign, Calendar, Plus, Trash2, Download } from 'lucide-react';
-import jsPDF from 'jspdf';
+import { 
+  TrendingUp, 
+  Target, 
+  Camera, 
+  Clock, 
+  Users, 
+  DollarSign, 
+  FileText, 
+  RefreshCw,
+  Calendar,
+  Award,
+  Zap
+} from 'lucide-react';
 
-interface InvoiceItem {
-  description: string;
-  quantity: number;
-  unitPrice: number;
+interface RevenueData {
+  month: string;
+  amount: number;
 }
 
-interface InvoiceData {
-  clientName: string;
-  clientEmail: string;
-  clientAddress: string;
-  invoiceDate: string;
-  dueDate: string;
-  items: InvoiceItem[];
+interface ShootTypeData {
+  type: string;
+  count: number;
+  percentage: number;
+  color: string;
 }
 
-function InvoiceGenerator() {
+interface TeamMemberData {
+  name: string;
+  role: string;
+  completedProjects: number;
+  revenue: number;
+}
+
+function Analytics() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [invoiceData, setInvoiceData] = useState<InvoiceData>({
-    clientName: '',
-    clientEmail: '',
-    clientAddress: '',
-    invoiceDate: new Date().toISOString().split('T')[0],
-    dueDate: '',
-    items: [{ description: '', quantity: 1, unitPrice: 0 }],
-  });
 
-  const addItem = () => {
-    setInvoiceData({
-      ...invoiceData,
-      items: [...invoiceData.items, { description: '', quantity: 1, unitPrice: 0 }],
-    });
-  };
+  // Mock analytics data
+  const revenueData: RevenueData[] = [
+    { month: 'Aug', amount: 180000 },
+    { month: 'Sep', amount: 220000 },
+    { month: 'Oct', amount: 195000 },
+    { month: 'Nov', amount: 285000 },
+    { month: 'Dec', amount: 320000 },
+    { month: 'Jan', amount: 275000 }
+  ];
 
-  const removeItem = (index: number) => {
-    setInvoiceData({
-      ...invoiceData,
-      items: invoiceData.items.filter((_, i) => i !== index),
-    });
-  };
+  const shootTypeData: ShootTypeData[] = [
+    { type: 'Wedding', count: 15, percentage: 45, color: '#00BCEB' },
+    { type: 'Pre-Wedding', count: 8, percentage: 24, color: '#FF6B00' },
+    { type: 'Maternity', count: 5, percentage: 15, color: '#10B981' },
+    { type: 'Corporate', count: 3, percentage: 9, color: '#8B5CF6' },
+    { type: 'Portrait', count: 2, percentage: 6, color: '#F59E0B' }
+  ];
 
-  const updateItem = (index: number, field: keyof InvoiceItem, value: string | number) => {
-    const updatedItems = [...invoiceData.items];
-    updatedItems[index] = { ...updatedItems[index], [field]: value };
-    setInvoiceData({ ...invoiceData, items: updatedItems });
-  };
+  const teamMemberData: TeamMemberData[] = [
+    { name: 'Arif Khan', role: 'Lead Photographer', completedProjects: 12, revenue: 450000 },
+    { name: 'Priya Sharma', role: 'Photographer', completedProjects: 8, revenue: 280000 },
+    { name: 'Rahul Verma', role: 'Editor', completedProjects: 15, revenue: 0 },
+    { name: 'Sneha Patel', role: 'Assistant', completedProjects: 6, revenue: 150000 }
+  ];
 
-  const updateInvoiceData = (field: keyof InvoiceData, value: string) => {
-    setInvoiceData({ ...invoiceData, [field]: value });
-  };
+  const quickStats = [
+    { label: 'Total Projects', value: '33', icon: Camera, color: 'text-[#00BCEB]', bgColor: 'bg-[#00BCEB]/10' },
+    { label: 'Total Leads', value: '47', icon: Users, color: 'text-[#FF6B00]', bgColor: 'bg-[#FF6B00]/10' },
+    { label: 'Acceptance Rate', value: '78%', icon: Target, color: 'text-green-600', bgColor: 'bg-green-100' },
+    { label: 'Repeat Clients', value: '24%', icon: RefreshCw, color: 'text-purple-600', bgColor: 'bg-purple-100' }
+  ];
 
-  const calculateSubtotal = () => {
-    return invoiceData.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  };
-
-  const calculateTax = (subtotal: number, taxRate: number = 0.18) => {
-    return subtotal * taxRate;
-  };
+  const conversionRate = 70; // 70% conversion rate
+  const avgApprovalDays = 3.2;
+  const totalRevenue = revenueData.reduce((sum, data) => sum + data.amount, 0);
+  const maxRevenue = Math.max(...revenueData.map(data => data.amount));
 
   const formatCurrency = (amount: number) => {
-    return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${(amount / 1000).toFixed(0)}K`;
   };
 
-  const downloadPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text('Invoice', 20, 20);
-    doc.setFontSize(12);
-    doc.text('Your Company Name', 20, 30);
-    doc.text(`Invoice Date: ${invoiceData.invoiceDate}`, 140, 30);
-    doc.text(`Due Date: ${invoiceData.dueDate || 'N/A'}`, 140, 40);
-
-    doc.setFontSize(14);
-    doc.text('Billed To:', 20, 60);
-    doc.setFontSize(12);
-    doc.text(invoiceData.clientName || 'Client Name', 20, 70);
-    doc.text(invoiceData.clientEmail || 'Client Email', 20, 80);
-    doc.text(invoiceData.clientAddress || 'Client Address', 20, 90);
-
-    doc.setFontSize(12);
-    let y = 110;
-    doc.text('Description', 20, y);
-    doc.text('Qty', 100, y);
-    doc.text('Unit Price', 130, y);
-    doc.text('Total', 170, y);
-    doc.line(20, y + 5, 190, y + 5);
-
-    y += 15;
-    invoiceData.items.forEach((item) => {
-      doc.text(item.description || 'Item', 20, y);
-      doc.text(item.quantity.toString(), 100, y);
-      doc.text(formatCurrency(item.unitPrice), 130, y);
-      doc.text(formatCurrency(item.quantity * item.unitPrice), 170, y);
-      y += 10;
-    });
-
-    y += 10;
-    const subtotal = calculateSubtotal();
-    const tax = calculateTax(subtotal);
-    const total = subtotal + tax;
-
-    doc.text(`Subtotal: ${formatCurrency(subtotal)}`, 130, y);
-    doc.text(`Tax (18%): ${formatCurrency(tax)}`, 130, y + 10);
-    doc.setFontSize(14);
-    doc.text(`Total: ${formatCurrency(total)}`, 130, y + 25);
-
-    doc.save(`invoice_${invoiceData.invoiceDate}.pdf`);
+  const formatFullCurrency = (amount: number) => {
+    return `₹${amount.toLocaleString()}`;
   };
-
-  const subtotal = calculateSubtotal();
-  const tax = calculateTax(subtotal);
-  const total = subtotal + tax;
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -122,198 +88,297 @@ function InvoiceGenerator() {
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+      <div className={`flex-1 transition-all duration-300 ease-in-out ${
+        sidebarCollapsed ? 'ml-16' : 'ml-64'
+      }`}>
         {/* Header */}
-        <Header title="Invoice Generator" sidebarCollapsed={sidebarCollapsed} />
+        <Header title="Analytics Overview" sidebarCollapsed={sidebarCollapsed} />
 
         {/* Main Content */}
         <main className="pt-16 p-6">
+          {/* Page Header */}
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-[#2D2D2D] mb-2">Create Invoice</h2>
-            <p className="text-gray-600">Generate professional invoices for your clients</p>
+            <h2 className="text-2xl font-bold text-[#2D2D2D] mb-2">Analytics Overview</h2>
+            <p className="text-gray-600">Monitor your growth and conversion trends</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Invoice Form */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-semibold text-[#2D2D2D] mb-4 flex items-center">
-                <FileText className="h-5 w-5 text-[#00BCEB] mr-2" />
-                Invoice Details
-              </h3>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Client Name</label>
-                  <input
-                    type="text"
-                    value={invoiceData.clientName}
-                    onChange={(e) => updateInvoiceData('clientName', e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    placeholder="Enter client name"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Client Email</label>
-                  <input
-                    type="email"
-                    value={invoiceData.clientEmail}
-                    onChange={(e) => updateInvoiceData('clientEmail', e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    placeholder="Enter client email"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Client Address</label>
-                  <textarea
-                    value={invoiceData.clientAddress}
-                    onChange={(e) => updateInvoiceData('clientAddress', e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    placeholder="Enter client address"
-                    rows={3}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Invoice Date</label>
-                    <input
-                      type="date"
-                      value={invoiceData.invoiceDate}
-                      onChange={(e) => updateInvoiceData('invoiceDate', e.target.value)}
-                      className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Due Date</label>
-                    <input
-                      type="date"
-                      value={invoiceData.dueDate}
-                      onChange={(e) => updateInvoiceData('dueDate', e.target.value)}
-                      className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-semibold text-[#2D2D2D] mb-2">Items</h4>
-                  {invoiceData.items.map((item, index) => (
-                    <div key={index} className="flex items-center space-x-2 mb-2">
-                      <input
-                        type="text"
-                        value={item.description}
-                        onChange={(e) => updateItem(index, 'description', e.target.value)}
-                        placeholder="Item description"
-                        className="flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                      />
-                      <input
-                        type="number"
-                        value={item.quantity}
-                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                        placeholder="Qty"
-                        className="w-20 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                      />
-                      <input
-                        type="number"
-                        value={item.unitPrice}
-                        onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
-                        placeholder="Unit Price"
-                        className="w-24 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                      />
-                      {invoiceData.items.length > 1 && (
-                        <button
-                          onClick={() => removeItem(index)}
-                          className="p-2 text-red-600 hover:text-red-800"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
-                      )}
+          {/* Quick Stats Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {quickStats.map((stat, index) => {
+              const Icon = stat.icon;
+              return (
+                <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-1">{stat.label}</p>
+                      <p className="text-2xl font-bold text-[#2D2D2D]">{stat.value}</p>
                     </div>
+                    <div className={`p-3 rounded-lg ${stat.bgColor}`}>
+                      <Icon className={`h-6 w-6 ${stat.color}`} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Main Analytics Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {/* Revenue Chart */}
+            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2D2D2D]">Revenue (Last 6 Months)</h3>
+                  <p className="text-sm text-gray-600">Total: {formatFullCurrency(totalRevenue)}</p>
+                </div>
+                <TrendingUp className="h-5 w-5 text-[#00BCEB]" />
+              </div>
+              
+              <div className="relative h-64">
+                <svg className="w-full h-full" viewBox="0 0 400 200">
+                  {/* Grid lines */}
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <line
+                      key={i}
+                      x1="40"
+                      y1={40 + i * 32}
+                      x2="380"
+                      y2={40 + i * 32}
+                      stroke="#f3f4f6"
+                      strokeWidth="1"
+                    />
                   ))}
-                  <button
-                    onClick={addItem}
-                    className="mt-2 flex items-center text-[#00BCEB] hover:text-[#0095c8]"
-                  >
-                    <Plus className="h-5 w-5 mr-1" />
-                    Add Item
-                  </button>
+                  
+                  {/* Revenue line */}
+                  <polyline
+                    fill="none"
+                    stroke="#00BCEB"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={revenueData.map((data, index) => {
+                      const x = 60 + (index * 55);
+                      const y = 170 - ((data.amount / maxRevenue) * 120);
+                      return `${x},${y}`;
+                    }).join(' ')}
+                  />
+                  
+                  {/* Data points */}
+                  {revenueData.map((data, index) => {
+                    const x = 60 + (index * 55);
+                    const y = 170 - ((data.amount / maxRevenue) * 120);
+                    return (
+                      <g key={index}>
+                        <circle
+                          cx={x}
+                          cy={y}
+                          r="4"
+                          fill="#00BCEB"
+                          className="hover:r-6 transition-all duration-200 cursor-pointer"
+                        />
+                        <text
+                          x={x}
+                          y="190"
+                          textAnchor="middle"
+                          className="text-xs fill-gray-600"
+                        >
+                          {data.month}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  
+                  {/* Y-axis labels */}
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <text
+                      key={i}
+                      x="30"
+                      y={175 - i * 32}
+                      textAnchor="end"
+                      className="text-xs fill-gray-600"
+                    >
+                      {formatCurrency((maxRevenue / 4) * i)}
+                    </text>
+                  ))}
+                </svg>
+              </div>
+            </div>
+
+            {/* Conversion Rate */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2D2D2D]">Conversion Rate</h3>
+                  <p className="text-sm text-gray-600">Leads → Projects</p>
+                </div>
+                <Target className="h-5 w-5 text-[#FF6B00]" />
+              </div>
+              
+              <div className="flex items-center justify-center">
+                <div className="relative w-32 h-32">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    {/* Background circle */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="none"
+                      stroke="#f3f4f6"
+                      strokeWidth="8"
+                    />
+                    {/* Progress circle */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="none"
+                      stroke="#FF6B00"
+                      strokeWidth="8"
+                      strokeLinecap="round"
+                      strokeDasharray={`${conversionRate * 2.51} 251`}
+                      className="transition-all duration-1000"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-2xl font-bold text-[#2D2D2D]">{conversionRate}%</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-4 text-center">
+                <p className="text-sm text-gray-600">33 projects from 47 leads</p>
+              </div>
+            </div>
+
+            {/* Top Shoot Types */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2D2D2D]">Top Shoot Types</h3>
+                  <p className="text-sm text-gray-600">This month</p>
+                </div>
+                <Camera className="h-5 w-5 text-[#00BCEB]" />
+              </div>
+              
+              <div className="space-y-4">
+                {shootTypeData.map((type, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div
+                        className="w-3 h-3 rounded-full mr-3"
+                        style={{ backgroundColor: type.color }}
+                      ></div>
+                      <span className="text-sm font-medium text-[#2D2D2D]">{type.type}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm text-gray-600">{type.count}</span>
+                      <div className="w-16 bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${type.percentage}%`,
+                            backgroundColor: type.color
+                          }}
+                        ></div>
+                      </div>
+                      <span className="text-sm font-medium text-[#2D2D2D] w-8">{type.percentage}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Proposal Approval Time */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2D2D2D]">Proposal Approval</h3>
+                  <p className="text-sm text-gray-600">Average response time</p>
+                </div>
+                <Clock className="h-5 w-5 text-[#FF6B00]" />
+              </div>
+              
+              <div className="text-center">
+                <div className="text-3xl font-bold text-[#2D2D2D] mb-2">{avgApprovalDays}</div>
+                <div className="text-sm text-gray-600 mb-4">days to approve</div>
+                
+                <div className="space-y-2">
+                  {['Oct', 'Nov', 'Dec', 'Jan'].map((month, index) => {
+                    const days = [4.1, 3.8, 2.9, 3.2][index];
+                    const width = (days / 5) * 100;
+                    return (
+                      <div key={month} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600 w-8">{month}</span>
+                        <div className="flex-1 mx-2 bg-gray-200 rounded-full h-2">
+                          <div
+                            className="h-2 bg-[#FF6B00] rounded-full transition-all duration-500"
+                            style={{ width: `${width}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-[#2D2D2D] w-8">{days}d</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* Invoice Preview */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-[#2D2D2D] flex items-center">
-                  <DollarSign className="h-5 w-5 text-[#00BCEB] mr-2" />
-                  Invoice Preview
-                </h3>
-                <button
-                  onClick={downloadPDF}
-                  className="flex items-center bg-[#00BCEB] text-white px-4 py-2 rounded-lg hover:bg-[#0095c8] transition-colors"
-                >
-                  <Download className="h-5 w-5 mr-2" />
-                  Download PDF
-                </button>
+            {/* Top Performing Team Members */}
+            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2D2D2D]">Top Performing Team Members</h3>
+                  <p className="text-sm text-gray-600">This quarter</p>
+                </div>
+                <Award className="h-5 w-5 text-[#00BCEB]" />
               </div>
-
-              <div className="border border-gray-200 rounded-lg p-6">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h4 className="text-xl font-bold text-[#2D2D2D]">Invoice</h4>
-                    <p className="text-sm text-gray-600">Your Company Name</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-[#2D2D2D]">Invoice Date: {invoiceData.invoiceDate}</p>
-                    <p className="text-sm font-medium text-[#2D2D2D]">Due Date: {invoiceData.dueDate || 'N/A'}</p>
-                  </div>
-                </div>
-
-                <div className="mb-6">
-                  <h5 className="text-sm font-semibold text-[#2D2D2D] mb-2">Billed To:</h5>
-                  <p className="text-sm text-gray-600">{invoiceData.clientName || 'Client Name'}</p>
-                  <p className="text-sm text-gray-600">{invoiceData.clientEmail || 'Client Email'}</p>
-                  <p className="text-sm text-gray-600">{invoiceData.clientAddress || 'Client Address'}</p>
-                </div>
-
-                <table className="w-full mb-6">
+              
+              <div className="overflow-x-auto">
+                <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-200">
-                      <th className="text-left py-2 text-sm font-medium text-gray-600">Description</th>
-                      <th className="text-right py-2 text-sm font-medium text-gray-600">Qty</th>
-                      <th className="text-right py-2 text-sm font-medium text-gray-600">Unit Price</th>
-                      <th className="text-right py-2 text-sm font-medium text-gray-600">Total</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 text-sm">Name</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 text-sm">Role</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 text-sm">Projects</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 text-sm">Revenue</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-600 text-sm">Performance</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {invoiceData.items.map((item, index) => (
-                      <tr key={index} className="border-b border-gray-100">
-                        <td className="py-2 text-sm text-[#2D2D2D]">{item.description || 'Item'}</td>
-                        <td className="py-2 text-sm text-right text-[#2D2D2D]">{item.quantity}</td>
-                        <td className="py-2 text-sm text-right text-[#2D2D2D]">{formatCurrency(item.unitPrice)}</td>
-                        <td className="py-2 text-sm text-right text-[#2D2D2D]">{formatCurrency(item.quantity * item.unitPrice)}</td>
-                      </tr>
-                    ))}
+                    {teamMemberData.map((member, index) => {
+                      const maxProjects = Math.max(...teamMemberData.map(m => m.completedProjects));
+                      const performanceWidth = (member.completedProjects / maxProjects) * 100;
+                      
+                      return (
+                        <tr key={index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors duration-200">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center">
+                              <div className="w-8 h-8 bg-[#00BCEB]/10 rounded-full flex items-center justify-center mr-3">
+                                <span className="text-[#00BCEB] font-medium text-sm">
+                                  {member.name.split(' ').map(n => n[0]).join('')}
+                                </span>
+                              </div>
+                              <span className="font-medium text-[#2D2D2D]">{member.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-sm text-gray-600">{member.role}</td>
+                          <td className="py-3 px-4 text-sm font-medium text-[#2D2D2D]">{member.completedProjects}</td>
+                          <td className="py-3 px-4 text-sm font-medium text-green-600">
+                            {member.revenue > 0 ? formatFullCurrency(member.revenue) : '-'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="h-2 bg-[#00BCEB] rounded-full transition-all duration-500"
+                                style={{ width: `${performanceWidth}%` }}
+                              ></div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
-
-                <div className="flex justify-end">
-                  <div className="w-64">
-                    <div className="flex justify-between py-2 text-sm">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="text-[#2D2D2D] font-medium">{formatCurrency(subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 text-sm">
-                      <span className="text-gray-600">Tax (18%):</span>
-                      <span className="text-[#2D2D2D] font-medium">{formatCurrency(tax)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 text-lg font-bold text-[#2D2D2D] border-t border-gray-200">
-                      <span>Total:</span>
-                      <span>{formatCurrency(total)}</span>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -323,4 +388,4 @@ function InvoiceGenerator() {
   );
 }
 
-export default InvoiceGenerator;
+export default Analytics;
