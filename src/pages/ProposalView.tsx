@@ -44,6 +44,11 @@ interface TimelineItem {
   phase: string;
   description: string;
   duration: string;
+  services?: Array<{
+    name?: string;
+    count?: number;
+    id?: string;
+  }>;
 }
 
 interface ProposalData {
@@ -83,6 +88,11 @@ interface ApiProposalItem {
     date?: string;
     time?: string;
     description?: string;
+    services?: Array<{
+      name?: string;
+      count?: number;
+      id?: string;
+    }>;
   }>;
   services?: Array<{
     name?: string;
@@ -190,6 +200,7 @@ function ProposalView() {
             phase: event.eventTitle || 'Event',
             description: event.description || '',
             duration: event.date ? `${event.date}${event.time ? ` at ${event.time}` : ''}` : '',
+            services: event.services || [],
           }));
         }
         // Note: Removed shootType fallback as requested - don't show shoot type in events
@@ -525,6 +536,18 @@ function ProposalView() {
                       <p className="text-sm text-gray-200">
                         <span className="font-semibold">Venue:</span> {proposal.venue}
                       </p>
+                    )}
+                    {event.services && event.services.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-gray-500">
+                        <p className="text-sm font-semibold text-gray-300 mb-2">Services:</p>
+                        <div className="space-y-1">
+                          {event.services.map((service, sIdx) => (
+                            <p key={sIdx} className="text-xs text-gray-300">
+                              • {service.name || 'Service'} {service.count && service.count > 1 ? `(x${service.count})` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 ))}
