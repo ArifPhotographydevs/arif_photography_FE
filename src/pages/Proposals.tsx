@@ -268,7 +268,7 @@ function Proposals() {
         <Header title="Proposals" sidebarCollapsed={sidebarCollapsed} />
 
         {/* Main */}
-        <main className="pt-16 p-6">
+        <main className="pt-16 p-6 max-w-full overflow-hidden">
           {/* Top */}
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -408,18 +408,18 @@ function Proposals() {
 
           {/* Desktop Table */}
           <div className="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto max-w-full">
+              <table className="w-full min-w-[1200px]">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Proposal</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Details</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change Requests</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valid Until</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    {/* <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">Proposal</th> */}
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-64">Client</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">Event Details</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Amount</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Change Requests</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Valid Until</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -433,20 +433,20 @@ function Proposals() {
                     return (
                       <React.Fragment key={proposal.id}>
                         <tr className="hover:bg-gray-50 transition-colors duration-200">
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          {/* <td className="px-4 py-4 w-48">
                             <div>
-                              <div className="text-sm font-medium text-[#2D2D2D]">{proposal.proposalId}</div>
-                              <div className="text-sm text-gray-500">{proposal.shootType}</div>
+                              <div className="text-sm font-medium text-[#2D2D2D] truncate">{proposal.proposalId}</div>
+                              <div className="text-sm text-gray-500 truncate">{proposal.shootType}</div>
                             </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          </td> */}
+                          <td className="px-4 py-4 w-64">
                             <div className="flex items-center">
-                              <div className="w-10 h-10 bg-[#00BCEB]/10 rounded-full flex items-center justify-center">
-                                <User className="h-5 w-5 text-[#00BCEB]" />
+                              <div className="w-8 h-8 bg-[#00BCEB]/10 rounded-full flex items-center justify-center flex-shrink-0">
+                                <User className="h-4 w-4 text-[#00BCEB]" />
                               </div>
-                              <div className="ml-3">
-                                <div className="text-sm font-medium text-[#2D2D2D]">{proposal.clientName}</div>
-                                <div className="text-sm text-gray-500">{proposal.clientEmail}</div>
+                              <div className="ml-2 min-w-0 flex-1">
+                                <div className="text-sm font-medium text-[#2D2D2D] truncate">{proposal.clientName}</div>
+                                <div className="text-sm text-gray-500 truncate">{proposal.clientEmail}</div>
                                 <button
                                   onClick={() => handleViewLead(proposal.leadId)}
                                   className="text-xs text-[#00BCEB] hover:text-[#00A5CF] transition-colors duration-200 flex items-center mt-1"
@@ -457,58 +457,58 @@ function Proposals() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 w-40">
                             <div className="flex items-center">
-                              <Calendar className="h-4 w-4 text-gray-400 mr-2" />
-                              <div>
-                                <div className="text-sm text-[#2D2D2D]">
+                              <Calendar className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-sm text-[#2D2D2D] truncate">
                                   {new Date(proposal.eventDate).toLocaleDateString()}
                                 </div>
-                                <div className="text-sm text-gray-500">{proposal.shootType}</div>
+                                <div className="text-sm text-gray-500 truncate">{proposal.shootType}</div>
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 w-32">
                             <div className="flex items-center">
-                              <DollarSign className="h-4 w-4 text-gray-400 mr-2" />
-                              <span className="text-sm font-semibold text-[#2D2D2D]">
+                              <DollarSign className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" />
+                              <span className="text-sm font-semibold text-[#2D2D2D] truncate">
                                 {formatCurrency(proposal.totalAmount)}
                               </span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(proposal.status)}`}>
+                          <td className="px-4 py-4 w-32">
+                            <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(proposal.status)}`}>
                               <StatusIcon className="h-3 w-3 mr-1" />
-                              {proposal.status}
+                              <span className="truncate">{proposal.status}</span>
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 w-36">
                             {isRequested ? (
                               <button
                                 onClick={() => toggleExpand(proposal.proposalId)}
-                                className="inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200 transition-colors"
+                                className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200 transition-colors"
                                 title="View change requests"
                               >
                                 {expanded ? <ChevronDown className="h-3 w-3 mr-1" /> : <ChevronRight className="h-3 w-3 mr-1" />}
-                                {count ? `${count} request${count > 1 ? 's' : ''}` : 'View'}
+                                <span className="truncate">{count ? `${count} request${count > 1 ? 's' : ''}` : 'View'}</span>
                               </button>
                             ) : (
                               <span className="text-xs text-gray-400">—</span>
                             )}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 w-32">
                             <div className={`text-sm ${expiringSoon ? 'text-[#FF6B00] font-medium' : 'text-gray-600'}`}>
-                              {new Date(proposal.validUntil).toLocaleDateString()}
+                              <div className="truncate">{new Date(proposal.validUntil).toLocaleDateString()}</div>
                               {expiringSoon && (
                                 <div className="text-xs text-[#FF6B00]">Expiring Soon!</div>
                               )}
                             </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center space-x-2">
+                          <td className="px-4 py-4 w-32">
+                            <div className="flex items-center space-x-1">
                               <button
                                 onClick={() => handleViewProposal(proposal.proposalId)}
-                                className="p-2 text-[#00BCEB] hover:text-[#00A5CF] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
+                                className="p-1.5 text-[#00BCEB] hover:text-[#00A5CF] hover:bg-[#00BCEB]/10 rounded-lg transition-colors duration-200"
                                 title="View Proposal"
                               >
                                 <Eye className="h-4 w-4" />
@@ -516,7 +516,7 @@ function Proposals() {
                               {proposal.status === 'Draft' && (
                                 <button
                                   onClick={() => handleEditProposal(proposal.id)}
-                                  className="p-2 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
+                                  className="p-1.5 text-[#FF6B00] hover:text-[#e55a00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors duration-200"
                                   title="Edit Proposal"
                                 >
                                   <Edit3 className="h-4 w-4" />
@@ -525,7 +525,7 @@ function Proposals() {
                               {isRequested && (
                                 <button
                                   onClick={() => setMessageOpenFor(proposal)}
-                                  className="p-2 text-yellow-700 hover:bg-yellow-50 rounded-lg transition-colors duration-200"
+                                  className="p-1.5 text-yellow-700 hover:bg-yellow-50 rounded-lg transition-colors duration-200"
                                   title="Send Message"
                                 >
                                   <MessageSquare className="h-4 w-4" />
@@ -533,7 +533,7 @@ function Proposals() {
                               )}
                               <button
                                 onClick={() => handleDuplicateProposal(proposal.id)}
-                                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                                className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
                                 title="Duplicate Proposal"
                               >
                                 <Copy className="h-4 w-4" />
@@ -545,7 +545,7 @@ function Proposals() {
                         {/* Expanded history row */}
                         {isRequested && expanded && (
                           <tr className="bg-yellow-50/40">
-                            <td colSpan={8} className="px-6 py-4">
+                            <td colSpan={8} className="px-4 py-4">
                               <div className="space-y-3">
                                 <div className="text-sm font-semibold text-[#2D2D2D]">Change Request History</div>
                                 {(proposal.revisionHistory?.length
