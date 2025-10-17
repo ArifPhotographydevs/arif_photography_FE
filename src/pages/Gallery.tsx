@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 /* Full modified Gallery.tsx — every single line included.
    Changes: simplified share flow to POST-only (no token fallback),
    robust response parsing, clearer errors/logging.
@@ -9,8 +8,6 @@
    Loader Additions: Added loading indicators for folder creation, share generation, bulk download, image list fetching, and other operations.
 */
 
-=======
->>>>>>> Stashed changes
 import React, { useState, useEffect, Component, ErrorInfo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
@@ -165,7 +162,6 @@ function Gallery() {
   const [sortBy, setSortBy] = useState('uploadDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
-  const [photolistModal, setPhotolistModal] = useState<{ isOpen: boolean; imageNames: string[] }>({ isOpen: false, imageNames: [] });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [createFolderLoading, setCreateFolderLoading] = useState(false); // New: Loader for folder creation
   const [shareLoading, setShareLoading] = useState(false); // New: Loader for share
@@ -626,14 +622,9 @@ const handleShare = async () => {
     return;
   }
 
-<<<<<<< Updated upstream
   setShareLoading(true);
   addNotification('Generating share link(s)...', 'info');
   try {
-=======
-  try {
-    addNotification('Generating share link(s)...', 'info');
->>>>>>> Stashed changes
     const links = await generateShareableLinks(selectedItems);
 
     if (links.length === 0) {
@@ -655,7 +646,6 @@ const handleShare = async () => {
     addNotification(`Share failed: ${message}`, 'error');
     setError(`Share failed: ${message}`);
     setShareModal({ isOpen: true, links: [], serverMessage: message });
-<<<<<<< Updated upstream
   } finally {
     setShareLoading(false);
   }
@@ -696,13 +686,6 @@ const generateShareableLinks = async (forItemIds: string[]) => {
 const handleShareSingle = async (item: GalleryItem) => {
   setShareLoading(true);
   addNotification('Generating share link...', 'info');
-=======
-  }
-};
-
-// (Optional) Updated handleShareSingle if you want files to use /shared-images format
-const handleShareSingle = async (item: GalleryItem) => {
->>>>>>> Stashed changes
   try {
     const baseUrl = window.location.origin || 'http://localhost:5173';
     const path = item.key || item.id;
@@ -713,11 +696,8 @@ const handleShareSingle = async (item: GalleryItem) => {
     console.error('Share single failed:', err);
     addNotification(`Share failed: ${err.message}`, 'error');
     setShareModal({ isOpen: true, links: [], serverMessage: err.message });
-<<<<<<< Updated upstream
   } finally {
     setShareLoading(false);
-=======
->>>>>>> Stashed changes
   }
 };
   // -------------------- Filters & sorting (unchanged logic from original) --------------------
@@ -928,7 +908,7 @@ const handleShareSingle = async (item: GalleryItem) => {
 
       setItems((prev) => prev.filter((item) => !deletedItems.some((d) => d.id === item.id)));
       setFolders((prev) => prev.filter((folder) => !deletedFolders.some((d) => d.path === folder.path)));
-      setSelectedItems((prev) => prev.filter((id) => !deletedItems.some((d) => d.id === id) && !deletedFolders.some((d) => d.path === id}));
+      setSelectedItems((prev) => prev.filter((id) => !deletedItems.some((d) => d.id === id) && !deletedFolders.some((d) => d.path === id)));
 
       if (errors.length > 0) {
         setDeleteErrors(errors);
@@ -1337,12 +1317,6 @@ const handleShareSingle = async (item: GalleryItem) => {
       setError(`Upload failed: ${error.message}`);
       addNotification(`Upload failed: ${error.message}`, 'error');
     }
-  };
-
-  // -------------------- Generate image list for copy-paste --------------------
-  const generateImageList = () => {
-    const imageNames = filteredImages.map((item) => item.title.replace(/\.[^/.]+$/, ''));
-    return imageNames.join('\n');
   };
 
   // -------------------- Render UI --------------------
@@ -1991,6 +1965,20 @@ const handleShareSingle = async (item: GalleryItem) => {
                     </div>
                   ))}
 
+                  {/* <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="email"
+                        placeholder="Enter email address"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
+                      />
+                      <button className="p-2 text-[#00BCEB] hover:text-[#00A5CF]">
+                        <Mail className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div> */}
+
                   <div className="flex justify-end space-x-2">
                     <button
                       onClick={() => setShareModal({ isOpen: false, links: [], serverMessage: null })}
@@ -2027,7 +2015,6 @@ const handleShareSingle = async (item: GalleryItem) => {
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-<<<<<<< Updated upstream
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
                   <input
@@ -2044,30 +2031,13 @@ const handleShareSingle = async (item: GalleryItem) => {
                     onClick={() => setCreateFolderModal(false)}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800"
                     disabled={createFolderLoading}
-=======
-                <input
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="Enter folder name"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent mb-4"
-                />
-                <div className="flex justify-end space-x-3">
-                  <button
-                    onClick={() => setCreateFolderModal(false)}
-                    className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors duration-200"
->>>>>>> Stashed changes
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateFolder}
-<<<<<<< Updated upstream
                     className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] flex items-center"
                     disabled={createFolderLoading}
-=======
-                    className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200"
->>>>>>> Stashed changes
                   >
                     Create
                     {createFolderLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
