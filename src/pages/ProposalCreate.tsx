@@ -670,8 +670,7 @@ function ProposalCreate() {
   const handleSendProposal = async () => {
     const recipient = (proposalData.recipientEmail || '').trim();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!recipient) { alert("Please enter the recipient's email address before sending the proposal."); return; }
-    if (!emailRegex.test(recipient)) { alert("Please enter a valid recipient email address."); return; }
+    // Recipient email is now optional - removed validation requirements
 
     setIsSubmitting(true);
     try {
@@ -711,35 +710,41 @@ function ProposalCreate() {
       const newProposalId = result.proposalId;
       const proposalLink = `https://arif-photography-fe.vercel.app/proposals/view/${newProposalId}`;
 
-      const emailPayload = {
-        to: recipient,
-        subject: `Proposal from ${proposalData.clientName || 'Client'} — #${newProposalId}`,
-        proposalId: newProposalId,
-        clientName: proposalData.clientName,
-        events: proposalData.events,
-        services: proposalData.events.flatMap(e => e.services || []),
-        addOns: proposalData.addOns,
-        packageItems: proposalData.packageItems,
-        packageSubtotal: calculatePackageSubtotal(),
-        subtotal: calculateSubtotal(),
-        total: calculateTotal(),
-        notes: proposalData.footerNote,
-        proposalLink
-      };
+      // Only send email if recipient email is provided and valid
+      if (recipient && emailRegex.test(recipient)) {
+        const emailPayload = {
+          to: recipient,
+          subject: `Proposal from ${proposalData.clientName || 'Client'} — #${newProposalId}`,
+          proposalId: newProposalId,
+          clientName: proposalData.clientName,
+          events: proposalData.events,
+          services: proposalData.events.flatMap(e => e.services || []),
+          addOns: proposalData.addOns,
+          packageItems: proposalData.packageItems,
+          packageSubtotal: calculatePackageSubtotal(),
+          subtotal: calculateSubtotal(),
+          total: calculateTotal(),
+          notes: proposalData.footerNote,
+          proposalLink
+        };
 
-      const sendResponse = await fetch(SENDMAIL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload)
-      });
+        const sendResponse = await fetch(SENDMAIL_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload)
+        });
 
-      let sendResult: any = { success: sendResponse.ok };
-      try { sendResult = await sendResponse.json(); } catch {}
+        let sendResult: any = { success: sendResponse.ok };
+        try { sendResult = await sendResponse.json(); } catch {}
 
-      if (!sendResponse.ok || !sendResult.success) {
-        alert(`Proposal was created (ID: ${newProposalId}), but sending the email failed. Please send the link manually: ${proposalLink}`);
+        if (!sendResponse.ok || !sendResult.success) {
+          alert(`Proposal was created (ID: ${newProposalId}), but sending the email failed. Please send the link manually: ${proposalLink}`);
+        } else {
+          alert('Proposal saved and email sent successfully!');
+        }
       } else {
-        alert('Proposal saved and email sent successfully!');
+        // No recipient email provided - just save the proposal
+        alert(`Proposal saved successfully! (ID: ${newProposalId}) You can share this link manually: ${proposalLink}`);
       }
 
       navigate(`/proposals/view/${newProposalId}`);
@@ -883,10 +888,10 @@ function ProposalCreate() {
                           </div>
                         </div>
                         <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Recipient Email</label>
+                          <label className="block text-sm font-medium text-[#2D2D2D] mb-2">Recipient Email (Optional)</label>
                           <div className="relative">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Send className="h-4 w-4 text-gray-400" /></div>
-                            <input type="email" value={proposalData.recipientEmail} onChange={(e)=> handleInputChange('recipientEmail', e.target.value)} className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D]" placeholder="recipient@example.com"/>
+                            <input type="email" value={proposalData.recipientEmail} onChange={(e)=> handleInputChange('recipientEmail', e.target.value)} className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-[#2D2D2D]" placeholder="recipient@example.com (optional)"/>
                           </div>
                         </div>
                       </div>
@@ -1184,9 +1189,9 @@ function ProposalCreate() {
                         <button onClick={() => setCurrentStep(2)} className="px-4 py-2 bg-gray-100 text-[#2D2D2D] rounded-lg">Go Back</button>
                         <button
                           onClick={handleSendProposal}
-                          disabled={isSubmitting || !proposalData.recipientEmail}
-                          title={!proposalData.recipientEmail ? "Cannot send proposal: Recipient email is missing." : "Send Proposal"}
-                          className={`flex items-center px-6 py-2 rounded-lg font-medium ${(!isSubmitting && proposalData.recipientEmail) ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                          disabled={isSubmitting}
+                          title="Send Proposal"
+                          className={`flex items-center px-6 py-2 rounded-lg font-medium ${!isSubmitting ? 'bg-[#00BCEB] text-white hover:bg-[#00A5CF] shadow-lg' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
                         >
                           {isSubmitting ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Sending...</>) : (<><Send className="h-4 w-4 mr-2" />Send Proposal</>)}
                         </button>

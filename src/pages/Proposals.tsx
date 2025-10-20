@@ -92,9 +92,12 @@ function Proposals() {
         const arr = Array.isArray(data) ? data : (data.proposals || []);
         const mapped: Proposal[] = arr.map((item: any, index: number) => {
           const leadId = normalizeLeadId(item.leadId || item.PK || item.pk || '');
+          // Use clientSubtotal instead of total for the amount display
           const totalNumber =
-            typeof item.total === 'number' ? item.total :
-            (typeof item.total === 'string' ? Number(item.total) : 0);
+            typeof item.clientSubtotal === 'number' ? item.clientSubtotal :
+            (typeof item.clientSubtotal === 'string' ? Number(item.clientSubtotal) : 
+            (typeof item.total === 'number' ? item.total :
+            (typeof item.total === 'string' ? Number(item.total) : 0)));
 
           return {
             id: String(index),
