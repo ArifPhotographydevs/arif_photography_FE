@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Camera, Video, Film, Image } from 'lucide-react';
+import { Camera, Video } from 'lucide-react';
 
 const UPDATE_STATUS_URL = 'https://e419qsiwvk.execute-api.eu-north-1.amazonaws.com/updateproposalStatus';
 const GET_ALL_URL = 'https://av8kc9cjeh.execute-api.eu-north-1.amazonaws.com/GetAllProposalsData';
@@ -51,6 +51,21 @@ interface TimelineItem {
   }>;
 }
 
+interface PackageItem {
+  id: string;
+  name: string;
+  selected: boolean;
+  qty: number;
+  unitPrice?: number;
+}
+
+interface ComplimentaryItem {
+  id: string;
+  name: string;
+  selected: boolean;
+  qty: number;
+}
+
 interface ProposalData {
   id: string;
   leadId: string;
@@ -71,6 +86,8 @@ interface ProposalData {
   termsTemplate?: string;
   footerNote?: string;
   logos?: string[];
+  packageItems?: PackageItem[];
+  complimentaryItems?: ComplimentaryItem[];
 }
 
 interface ApiProposalItem {
@@ -121,6 +138,19 @@ interface ApiProposalItem {
   logos?: string[];
   // optionally a timeline if API provides one
   timeline?: Array<{ phase?: string; description?: string; duration?: string }>;
+  packageItems?: Array<{
+    id?: string;
+    name?: string;
+    selected?: boolean;
+    qty?: number;
+    unitPrice?: number;
+  }>;
+  complimentaryItems?: Array<{
+    id?: string;
+    name?: string;
+    selected?: boolean;
+    qty?: number;
+  }>;
 }
 
 interface ApiResponse {
@@ -211,6 +241,27 @@ function ProposalView() {
         const totalFromApi = typeof matched.clientSubtotal === 'number' ? matched.clientSubtotal :
           (typeof matched.total === 'number' ? matched.total : undefined);
 
+        // Map package items
+        const packageItems: PackageItem[] = Array.isArray(matched.packageItems)
+          ? matched.packageItems.map((p, idx) => ({
+              id: p.id?.toString() || `pkg-${idx}`,
+              name: p.name || '',
+              selected: !!p.selected,
+              qty: Number(p.qty || 1),
+              unitPrice: p.unitPrice != null ? Number(p.unitPrice) : undefined,
+            }))
+          : [];
+
+        // Map complimentary items
+        const complimentaryItems: ComplimentaryItem[] = Array.isArray(matched.complimentaryItems)
+          ? matched.complimentaryItems.map((c, idx) => ({
+              id: c.id?.toString() || `comp-${idx}`,
+              name: c.name || '',
+              selected: !!c.selected,
+              qty: Number(c.qty || 1),
+            }))
+          : [];
+
         const mapped: ProposalData = {
           id: matched.proposalId,
           leadId,
@@ -231,6 +282,8 @@ function ProposalView() {
           termsTemplate: matched.termsTemplate,
           footerNote: matched.footerNote,
           logos: Array.isArray(matched.logos) ? matched.logos : undefined,
+          packageItems,
+          complimentaryItems,
         };
 
         setProposal(mapped);
@@ -572,31 +625,41 @@ function ProposalView() {
             )}
           </div>
 
-          {/* Deliverables Section */}
+          {/* Deliverables Section - Package Items */}
           <div className="mb-16">
             <h2 className="text-4xl font-bold text-gray-900 mb-6 text-left" style={{ fontFamily: 'serif' }}>
               Deliverables
             </h2>
             <p className="text-gray-700 text-lg mb-8">As per your request, we propose the following Deliverables as part of this package:</p>
 
-            {/* Render services dynamically */}
-            <div className="space-y-4 mb-6">
-              {proposal.services && proposal.services.length > 0 ? (
-                proposal.services.map((s, i) => (
-                  <div key={i} className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                    <Camera className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                    <div>
-                      <h3 className="text-xl font-bold mb-2">{s.title || 'Service'}</h3>
-                      <p className="mb-2">{s.description || 'Service description'}</p>
+            {/* Package Items */}
+            {proposal.packageItems && proposal.packageItems.length > 0 ? (
+              <div className="space-y-4 mb-6">
+                {proposal.packageItems
+                  .filter(item => item.selected)
+                  .map((item, i) => (
+                    <div key={item.id || i} className="bg-gray-600 text-white p-6 rounded-lg flex items-start justify-between">
+                      <div className="flex items-start">
+                        <Camera className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
+                        <div>
+                          <h3 className="text-xl font-bold mb-2">{item.name}</h3>
+                          <p className="text-sm text-gray-200">Quantity: {item.qty}</p>
+                        </div>
+                      </div>
+                      {item.unitPrice && item.unitPrice > 0 && (
+                        <div className="text-right">
+                          <p className="text-sm text-gray-200">Unit Price</p>
+                          <p className="text-lg font-semibold">₹{item.unitPrice.toLocaleString()}</p>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))
-              ) : (
-                <div className="bg-gray-100 p-6 rounded-lg text-center">
-                  <p className="text-gray-600">No services specified</p>
-                </div>
-              )}
-            </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="bg-gray-100 p-6 rounded-lg text-center mb-6">
+                <p className="text-gray-600">No package items specified</p>
+              </div>
+            )}
 
             {/* Render selected add-ons dynamically */}
             {proposal.addOns.length > 0 && (
@@ -615,119 +678,34 @@ function ProposalView() {
                 </div>
               </div>
             )}
-
-            {/* Standard Deliverables - These can be made dynamic based on proposal data */}
-            <div className="space-y-4">
-              {/* Live Streaming - Show only if included in services or addOns */}
-              {(proposal.services.some(s => s.title.toLowerCase().includes('streaming')) || 
-                proposal.addOns.some(a => a.name.toLowerCase().includes('streaming'))) && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                  <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Live Streaming</h3>
-                    <p>Live Streaming for the Wedding (if requested)</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Traditional Video - Show only if included in services or addOns */}
-              {(proposal.services.some(s => s.title.toLowerCase().includes('traditional')) || 
-                proposal.addOns.some(a => a.name.toLowerCase().includes('traditional'))) && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                  <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Traditional Video</h3>
-                    <p>You shall receive a Complete Traditional Video with Editing</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Cinematic Film - Show only if included in services or addOns */}
-              {(proposal.services.some(s => s.title.toLowerCase().includes('cinematic')) || 
-                proposal.addOns.some(a => a.name.toLowerCase().includes('cinematic'))) && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                  <Film className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Cinematic Film</h3>
-                    <p>You shall receive a cinematic video curated from the best events/You shall Receive a Wedding Full Film (5-8 min).</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Teaser - Show only if included in services or addOns */}
-              {(proposal.services.some(s => s.title.toLowerCase().includes('teaser')) || 
-                proposal.addOns.some(a => a.name.toLowerCase().includes('teaser'))) && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                  <Film className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Teaser</h3>
-                    <p>Teaser for Couple shoot.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Printed Albums - Show only if included in services or addOns */}
-              {(proposal.services.some(s => s.title.toLowerCase().includes('album')) || 
-                proposal.addOns.some(a => a.name.toLowerCase().includes('album'))) && (
-                <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                  <Image className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Printed Albums</h3>
-                    <p>2 sets of album for the wedding and other events - (50 sheets each)</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Show message if no additional deliverables */}
-              {!proposal.services.some(s => 
-                s.title.toLowerCase().includes('streaming') || 
-                s.title.toLowerCase().includes('traditional') || 
-                s.title.toLowerCase().includes('cinematic') || 
-                s.title.toLowerCase().includes('teaser') || 
-                s.title.toLowerCase().includes('album')
-              ) && !proposal.addOns.some(a => 
-                a.name.toLowerCase().includes('streaming') || 
-                a.name.toLowerCase().includes('traditional') || 
-                a.name.toLowerCase().includes('cinematic') || 
-                a.name.toLowerCase().includes('teaser') || 
-                a.name.toLowerCase().includes('album')
-              ) && (
-                <div className="bg-gray-100 p-6 rounded-lg text-center">
-                  <p className="text-gray-600">Additional deliverables will be confirmed based on your selected services and add-ons.</p>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Complimentary Section */}
-          <div className="mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-8 text-left" style={{ fontFamily: 'serif' }}>
-              Complimentary
-            </h2>
+          {proposal.complimentaryItems && proposal.complimentaryItems.some(item => item.selected) && (
+            <div className="mb-16">
+              <h2 className="text-4xl font-bold text-gray-900 mb-8 text-left" style={{ fontFamily: 'serif' }}>
+                Complimentary
+              </h2>
 
-            <div className="space-y-4">
-              <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                <div>
-                  <h3 className="text-xl font-bold">Instagram Reels</h3>
-                </div>
-              </div>
-
-              <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                <div>
-                  <h3 className="text-xl font-bold">Whatsapp Invitation for the Wedding</h3>
-                </div>
-              </div>
-
-              <div className="bg-gray-600 text-white p-6 rounded-lg flex items-start">
-                <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
-                <div>
-                  <h3 className="text-xl font-bold">Couple Shoot Album (15-20Sheets)</h3>
-                </div>
+              <div className="space-y-4">
+                {proposal.complimentaryItems
+                  .filter(item => item.selected)
+                  .map((item, i) => (
+                    <div key={item.id || i} className="bg-gray-600 text-white p-6 rounded-lg flex items-start justify-between">
+                      <div className="flex items-start">
+                        <Video className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
+                        <div>
+                          <h3 className="text-xl font-bold">{item.name}</h3>
+                          {item.qty > 1 && (
+                            <p className="text-sm text-gray-200 mt-1">Quantity: {item.qty}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Payment Schedule Section */}
           <div className="mb-16">
