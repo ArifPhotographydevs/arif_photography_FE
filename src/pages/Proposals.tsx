@@ -134,7 +134,14 @@ function Proposals() {
           };
         });
 
-        setProposals(mapped);
+        // Sort by creation date (most recent first)
+        const sorted = mapped.sort((a, b) => {
+          const dateA = a.sentDate ? new Date(a.sentDate).getTime() : 0;
+          const dateB = b.sentDate ? new Date(b.sentDate).getTime() : 0;
+          return dateB - dateA; // Descending order (newest first)
+        });
+
+        setProposals(sorted);
       } catch (err) {
         console.error('Error fetching proposals:', err);
         setToast({ type: 'error', text: 'Failed to fetch proposals.' });

@@ -114,6 +114,7 @@ interface ApiProposalItem {
   latestRevisionNote?: string;
   revisionHistory?: Array<{ note: string; at: string }>;
   subtotal?: number;
+  clientSubtotal?: number;
   total?: number;
   termsTemplate?: string;
   footerNote?: string;
@@ -206,7 +207,9 @@ function ProposalView() {
         // Note: Removed shootType fallback as requested - don't show shoot type in events
 
         const subtotalFromApi = typeof matched.subtotal === 'number' ? matched.subtotal : undefined;
-        const totalFromApi = typeof matched.total === 'number' ? matched.total : undefined;
+        // Use clientSubtotal if available (matches Proposals table logic)
+        const totalFromApi = typeof matched.clientSubtotal === 'number' ? matched.clientSubtotal :
+          (typeof matched.total === 'number' ? matched.total : undefined);
 
         const mapped: ProposalData = {
           id: matched.proposalId,
