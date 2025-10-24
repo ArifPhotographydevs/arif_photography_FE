@@ -18,7 +18,8 @@ import {
   Check,
   Clock,
   AlertCircle,
-  MoreVertical,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
@@ -279,7 +280,33 @@ function ProposalCreate() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Success popup state
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [createdProposalId, setCreatedProposalId] = useState<string>('');
+  const [proposalLink, setProposalLink] = useState<string>('');
+  const [copySuccess, setCopySuccess] = useState(false);
+
   const [proposalData, setProposalData] = useState<ProposalData>({ ...emptyProposalTemplate });
+
+  // Copy to clipboard function
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
 
   // --- Fetch initial data (proposalId or leadId) --- (unchanged except we keep packageItems defaults)
   useEffect(() => {
@@ -708,7 +735,7 @@ function ProposalCreate() {
       }
 
       const newProposalId = result.proposalId;
-      const proposalLink = `https://arif-photography-fe.vercel.app/proposals/view/${newProposalId}`;
+      const proposalLink = `https://crm.arifphotography.in/proposals/view/${newProposalId}`;
 
       // Only send email if recipient email is provided and valid
       if (recipient && emailRegex.test(recipient)) {
@@ -738,16 +765,22 @@ function ProposalCreate() {
         try { sendResult = await sendResponse.json(); } catch {}
 
         if (!sendResponse.ok || !sendResult.success) {
-          alert(`Proposal was created (ID: ${newProposalId}), but sending the email failed. Please send the link manually: ${proposalLink}`);
+          // Show popup with link for manual sharing
+          setCreatedProposalId(newProposalId);
+          setProposalLink(proposalLink);
+          setShowSuccessPopup(true);
         } else {
-          alert('Proposal saved and email sent successfully!');
+          // Show success popup
+          setCreatedProposalId(newProposalId);
+          setProposalLink(proposalLink);
+          setShowSuccessPopup(true);
         }
       } else {
-        // No recipient email provided - just save the proposal
-        alert(`Proposal saved successfully! (ID: ${newProposalId}) You can share this link manually: ${proposalLink}`);
+        // No recipient email provided - show popup with link
+        setCreatedProposalId(newProposalId);
+        setProposalLink(proposalLink);
+        setShowSuccessPopup(true);
       }
-
-      navigate(`/proposals/view/${newProposalId}`);
     } catch (error: any) {
       console.error('Error sending proposal:', error);
       alert(`Error: ${error.message || 'An unexpected error occurred'}`);
@@ -1358,6 +1391,90 @@ function ProposalCreate() {
           </div>
         </main>
       </div>
+
+      {/* Success Popup */}
+      {showSuccessPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSuccessPopup(false)} />
+          <div className="relative bg-white w-full max-w-md rounded-xl shadow-2xl p-6 mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[#2D2D2D]">
+                Proposal Created Successfully!
+              </h3>
+              <button
+                onClick={() => setShowSuccessPopup(false)}
+                className="p-2 rounded hover:bg-gray-100"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div className="flex items-center">
+                  <Check className="h-5 w-5 text-green-600 mr-2" />
+                  <span className="text-sm font-medium text-green-800">
+                    Proposal ID: {createdProposalId}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#2D2D2D] mb-2">
+                  Share this link with your client:
+                </label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={proposalLink}
+                    readOnly
+                    className="flex-1 px-3 py-2 bg-[#F5F7FA] border border-gray-200 rounded-lg text-[#2D2D2D] text-sm"
+                  />
+                  <button
+                    onClick={() => copyToClipboard(proposalLink)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                      copySuccess
+                        ? 'bg-green-500 text-white'
+                        : 'bg-[#00BCEB] text-white hover:bg-[#00A5CF]'
+                    }`}
+                  >
+                    {copySuccess ? (
+                      <>
+                        <Check className="h-4 w-4 mr-1 inline" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4 mr-1 inline" />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t">
+                <button
+                  onClick={() => setShowSuccessPopup(false)}
+                  className="px-4 py-2 text-[#2D2D2D] bg-gray-100 rounded-lg font-medium hover:bg-gray-200 transition-colors duration-200"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSuccessPopup(false);
+                    navigate(`/proposals/view/${createdProposalId}`);
+                  }}
+                  className="px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#e55a00] transition-colors duration-200 flex items-center"
+                >
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  View Proposal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
