@@ -626,7 +626,6 @@ function ProposalView() {
                         <span className="font-semibold">Date & Time:</span> {event.duration}
                       </p>
                     )}
-                    <p className="mb-2">{event.description || 'Event details to be confirmed.'}</p>
                     {proposal.venue && idx === 0 && (
                       <p className="text-sm text-gray-200">
                         <span className="font-semibold">Venue:</span> {proposal.venue}

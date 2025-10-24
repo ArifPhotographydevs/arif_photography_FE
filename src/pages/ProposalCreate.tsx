@@ -30,7 +30,6 @@ interface Event {
   eventTitle: string;
   date: string;
   time: string;
-  description: string;
   services?: ServiceProvided[];
 }
 
@@ -101,7 +100,7 @@ const emptyProposalTemplate: ProposalData = {
   venue: '',
   notes: '',
   events: [
-    { id: '1', eventTitle: 'Wedding Day', date: '', time: '', description: 'Main wedding ceremony and reception coverage', services: [] }
+    { id: '1', eventTitle: 'Wedding Day', date: '', time: '', services: [] }
   ],
   servicesProvided: [],
   addOns: [
@@ -603,7 +602,6 @@ function ProposalCreate() {
       eventTitle: '',
       date: '',
       time: '',
-      description: '',
       services: []
     };
     setProposalData(prev => ({ ...prev, events: [...prev.events, newEvent] }));
@@ -982,10 +980,6 @@ function ProposalCreate() {
                                 <label className="block text-sm font-medium text-[#2D2D2D] mb-1">Time</label>
                                 <input type="time" value={event.time} onChange={(e) => handleEventChange(event.id, 'time', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg"/>
                               </div>
-                              <div>
-                                <label className="block text-sm font-medium text-[#2D2D2D] mb-1">Description</label>
-                                <input type="text" value={event.description} onChange={(e) => handleEventChange(event.id, 'description', e.target.value)} className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg" placeholder="Event description"/>
-                              </div>
                             </div>
 
                             {/* Services for this Event */}
@@ -1266,7 +1260,6 @@ function ProposalCreate() {
                           {proposalData.events.map((event) => (
                             <div key={event.id} className="border-l-4 border-[#00BCEB] pl-4">
                               <p className="font-medium text-[#2D2D2D]">{event.eventTitle || 'Event Title'}</p>
-                              <p className="text-sm text-gray-600">{event.description}</p>
                               {event.date && <p className="text-sm text-gray-600">Date: {new Date(event.date).toLocaleDateString()}</p>}
                               {event.time && <p className="text-sm text-gray-600">Time: {event.time}</p>}
                               {event.services && event.services.length > 0 && (
