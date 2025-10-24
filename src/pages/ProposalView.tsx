@@ -184,6 +184,45 @@ function ProposalView() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
+  // Function to get deliverable descriptions based on name and item data
+  const getDeliverableDescription = (name: string, item: any): string => {
+    // For album-related items, use the actual data from the item or from the package if available
+    if (name.toLowerCase().includes('album')) {
+      console.log('Album item found:', name);
+      console.log('Item data:', item);
+      console.log('Proposal data:', proposal);
+      console.log('Item albumSheets:', item.albumSheets);
+      console.log('Proposal albumSheets:', proposal && (proposal as any).albumSheets);
+      
+      const albumSheets = item.albumSheets || (proposal && (proposal as any).albumSheets);
+      console.log('Final albumSheets value:', albumSheets);
+      
+      if (albumSheets) {
+        return `${name} (${albumSheets} sheets)`;
+      }
+      // Fallback for album items without sheet data
+      return `${name} - Professional album service`;
+    }
+    
+    // For other items, use predefined descriptions
+    const descriptions: { [key: string]: string } = {
+      'Raw Footage': 'You shall receive a total Raw Footage of all the events',
+      'Engagement Promo': 'You shall receive a engagement Promo/Teaser.',
+      'Traditional Video': 'You shall receive a Complete Traditional Video with Editing',
+      'Cinematic Film': 'You shall receive a cinematic video curated from the best events.',
+      'Teaser': 'Teaser for Couple shoot.',
+      'Documentary Film': 'You Shall Receive a Documentary Wedding film. Chit Chat with Family.',
+      'Edited Images': 'You Shall Receive a edited images from all events.',
+      'Live Streaming': 'Live streaming of your special moments',
+      'Instagram Reels': 'Instagram Reels for social media sharing',
+      'Whatsapp Invitation': 'Whatsapp Invitation for the Wedding',
+      'Save The Date Video': 'Save The Date Video',
+      'Wedding Full Film': 'You shall Receive a Wedding Full Film (5-8 min).'
+    };
+    
+    return descriptions[name] || 'Professional photography service';
+  };
+
   useEffect(() => {
     const fetchProposal = async () => {
       try {
@@ -643,15 +682,12 @@ function ProposalView() {
                         <Camera className="h-8 w-8 mr-4 mt-1 flex-shrink-0" />
                         <div>
                           <h3 className="text-xl font-bold mb-2">{item.name}</h3>
-                          <p className="text-sm text-gray-200">Quantity: {item.qty}</p>
+                          <p className="text-sm text-gray-300 mb-2">{getDeliverableDescription(item.name, item)}</p>
+                          {item.qty && item.qty > 0 && (
+                            <p className="text-sm text-gray-200">Quantity: {item.qty}</p>
+                          )}
                         </div>
                       </div>
-                      {item.unitPrice && item.unitPrice > 0 && (
-                        <div className="text-right">
-                          <p className="text-sm text-gray-200">Unit Price</p>
-                          <p className="text-lg font-semibold">₹{item.unitPrice.toLocaleString()}</p>
-                        </div>
-                      )}
                     </div>
                   ))}
               </div>
