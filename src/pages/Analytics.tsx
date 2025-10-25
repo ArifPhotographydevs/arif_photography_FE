@@ -71,7 +71,7 @@ function InvoiceGenerator() {
     doc.setFontSize(20);
     doc.text('Invoice', 20, 20);
     doc.setFontSize(12);
-    doc.text('Your Company Name', 20, 30);
+    doc.text('Arif Photography', 20, 30);
     doc.text(`Invoice Date: ${invoiceData.invoiceDate}`, 140, 30);
     doc.text(`Due Date: ${invoiceData.dueDate || 'N/A'}`, 140, 40);
 

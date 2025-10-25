@@ -6,9 +6,11 @@
    Download Changes: Use actual filename with extension from S3 key for accurate local saving.
    CORS Download Fix: If fetch fails due to CORS, create temporary <a> tag with download attribute to trigger browser download without new tab.
    Loader Additions: Added loading indicators for folder creation, share generation, bulk download, image list fetching, and other operations.
+   Upload UI Changes: Replaced individual file progress bars with a single overall progress bar showing completed/total count (e.g., 5/100), updating incrementally as each upload completes. Added error count display if applicable.
+   New Changes: Added drag-and-drop upload support to the gallery area with visual feedback (drop zone overlay). Added upload speed calculation and display in the progress section (e.g., "1.2 MB/s"). Smoothed progress bar animations with CSS transitions. Enhanced video display in gallery with proper thumbnail generation using <video> preload="metadata" and poster fallback. Improved video player in preview modal with full controls, autoplay on open (muted), and better error handling.
 */
 
-import React, { useState, useEffect, Component, ErrorInfo, useRef } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
@@ -42,6 +44,7 @@ import {
   Mail,
   FolderPlus,
   Play,
+  Upload,
 } from 'lucide-react';
 
 // -------------------- Interfaces --------------------
@@ -71,6 +74,10 @@ interface UploadFile {
   progress: number;
   status: 'pending' | 'uploading' | 'completed' | 'error';
   error?: string;
+  startTime?: number; // For speed calculation
+  lastLoaded?: number; // For speed calculation
+  lastTime?: number; // For speed calculation
+  speed?: number; // Current upload speed in KB/s
 }
 
 interface DeleteError {
@@ -167,6 +174,7 @@ function Gallery() {
   const [shareLoading, setShareLoading] = useState(false); // New: Loader for share
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false); // New: Loader for bulk download
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
+  const [dragActive, setDragActive] = useState(false); // For drag and drop
 
   const shootTypes = [
     'Wedding',
@@ -202,6 +210,27 @@ function Gallery() {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 5000);
   };
+
+  // -------------------- Drag and Drop Handlers --------------------
+  const handleDrag = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileSelect(e.dataTransfer.files);
+    }
+  }, [handleFileSelect]);
 
   // -------------------- Fetch gallery items --------------------
   useEffect(() => {
@@ -418,7 +447,7 @@ function Gallery() {
           if (!prefix.endsWith('/')) prefix += '/';
 
           const resp = await fetch(
-            `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
+            `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
             { method: 'GET', headers: { 'Content-Type': 'application/json' }, mode: 'cors' }
           );
 
@@ -547,8 +576,6 @@ function Gallery() {
     }
   };
 
-
-
   /**
    * generateShareableLinks
    * Accepts selected IDs (either item.key or folder.path).
@@ -556,43 +583,55 @@ function Gallery() {
    * For folders: calls server to presign objects under prefixes.
    * Returns string[] of links.
    */
-  // const generateShareableLinks = async (forItemIds: string[]) => {
-  //   const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
-  //   const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
-  //   const links: string[] = [];
+  const generateShareableLinks = async (forItemIds: string[]) => {
+    const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
+    const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
+    const links: string[] = [];
 
-  //   // Items that already have direct URLs
-  //   if (itemIds.length > 0) {
-  //     const itemsToShare = items.filter((it) => itemIds.includes(it.id));
-  //     const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
-  //     const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
+    // Generate share links for folders locally
+    const baseUrl = window.location.origin || 'http://localhost:5173';
+    for (const folderPath of folderPaths) {
+      const encodedPath = encodeURIComponent(folderPath);
+      const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
+      links.push(shareLink);
+    }
 
-  //     if (directUrls.length > 0) {
-  //       links.push(...directUrls);
-  //     }
-  //     if (missingKeys.length > 0) {
-  //       // request presigned urls for these keys
-  //       const created = await requestShareLinksFromServer(missingKeys);
-  //       links.push(...created);
-  //     }
-  //   }
+    // Handle files
+    if (itemIds.length > 0) {
+      const itemsToShare = items.filter((it) => itemIds.includes(it.id));
+      const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
+      const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
 
-  //   if (folderPaths.length > 0) {
-  //     // convert to prefixes expected by backend (remove leading slash, ensure trailing slash)
-  //     const prefixes = folderPaths.map((p) => (p.startsWith('/') ? p.slice(1) : p)).map((p) => (p.endsWith('/') ? p : `${p}/`));
+      if (directUrls.length > 0) {
+        links.push(...directUrls);
+      }
+      if (missingKeys.length > 0) {
+        const created = await requestShareLinksFromServer(missingKeys);
+        links.push(...created);
+      }
+    }
 
-  //     // Server expects keys array: we will pass prefixes and metadata indicating folder share
-  //     try {
-  //       const created = await requestShareLinksFromServer(prefixes, { type: 'folder' });
-  //       links.push(...created);
-  //     } catch (err) {
-  //       // rethrow to allow caller show message, handled below
-  //       throw err;
-  //     }
-  //   }
+    return links;
+  };
 
-  //   return links;
-  // };
+  // (Optional) Updated handleShareSingle if you want files to use /shared-images format
+  const handleShareSingle = async (item: GalleryItem) => {
+    setShareLoading(true);
+    addNotification('Generating share link...', 'info');
+    try {
+      const baseUrl = window.location.origin || 'http://localhost:5173';
+      const path = item.key || item.id;
+      const encodedPath = encodeURIComponent(path);
+      const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
+      setShareModal({ isOpen: true, links: [shareLink], serverMessage: null });
+    } catch (err: any) {
+      console.error('Share single failed:', err);
+      addNotification(`Share failed: ${err.message}`, 'error');
+      setShareModal({ isOpen: true, links: [], serverMessage: err.message });
+    } finally {
+      setShareLoading(false);
+    }
+  };
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -651,55 +690,6 @@ const handleShare = async () => {
   }
 };
 
-const generateShareableLinks = async (forItemIds: string[]) => {
-  const folderPaths = forItemIds.filter((id) => id.startsWith('/'));
-  const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
-  const links: string[] = [];
-
-  // Generate share links for folders locally
-  const baseUrl = window.location.origin || 'http://localhost:5173';
-  for (const folderPath of folderPaths) {
-    const encodedPath = encodeURIComponent(folderPath);
-    const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
-    links.push(shareLink);
-  }
-
-  // Handle files
-  if (itemIds.length > 0) {
-    const itemsToShare = items.filter((it) => itemIds.includes(it.id));
-    const directUrls = itemsToShare.map((it) => it.imageUrl).filter(Boolean) as string[];
-    const missingKeys = itemsToShare.filter((it) => !it.imageUrl).map((it) => it.key || it.id);
-
-    if (directUrls.length > 0) {
-      links.push(...directUrls);
-    }
-    if (missingKeys.length > 0) {
-      const created = await requestShareLinksFromServer(missingKeys);
-      links.push(...created);
-    }
-  }
-
-  return links;
-};
-
-// (Optional) Updated handleShareSingle if you want files to use /shared-images format
-const handleShareSingle = async (item: GalleryItem) => {
-  setShareLoading(true);
-  addNotification('Generating share link...', 'info');
-  try {
-    const baseUrl = window.location.origin || 'http://localhost:5173';
-    const path = item.key || item.id;
-    const encodedPath = encodeURIComponent(path);
-    const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
-    setShareModal({ isOpen: true, links: [shareLink], serverMessage: null });
-  } catch (err: any) {
-    console.error('Share single failed:', err);
-    addNotification(`Share failed: ${err.message}`, 'error');
-    setShareModal({ isOpen: true, links: [], serverMessage: err.message });
-  } finally {
-    setShareLoading(false);
-  }
-};
   // -------------------- Filters & sorting (unchanged logic from original) --------------------
   const filteredImages = items
     .filter((item) => {
@@ -776,6 +766,29 @@ const handleShareSingle = async (item: GalleryItem) => {
   const handleImageClick = (item: GalleryItem) => {
     setPreviewModal({ isOpen: true, currentImage: item });
   };
+
+  const handleClosePreview = () => {
+    // Pause video if it's playing
+    const videoElement = document.querySelector('.preview-modal-video') as HTMLVideoElement;
+    if (videoElement) {
+      videoElement.pause();
+    }
+    setPreviewModal({ isOpen: false, currentImage: null });
+  };
+
+  // Handle keyboard events for modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && previewModal.isOpen) {
+        handleClosePreview();
+      }
+    };
+
+    if (previewModal.isOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [previewModal.isOpen]);
 
   const handleSelectItem = (id: string, checked: boolean) => {
     if (checked) {
@@ -1093,22 +1106,86 @@ const handleShareSingle = async (item: GalleryItem) => {
   };
 
   // -------------------- Upload handlers --------------------
-  const handleFileSelect = (selectedFiles: FileList | null) => {
+  // Define allowed file types
+  const ALLOWED_IMAGE_EXTENSIONS = [
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'tiff', 'tif', 'ico'
+  ];
+  
+  const ALLOWED_VIDEO_EXTENSIONS = [
+    'mp4', 'mov', 'avi', 'wmv', 'mkv', 'webm', 'flv', '3gp', 'm4v'
+  ];
+
+  const RAW_FILE_EXTENSIONS = [
+    'cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef', 'srw', 'x3f', 'raf', '3fr', 'fff', 'dcr', 'kdc', 'srf', 'mrw'
+  ];
+
+  const isValidFileType = (file: File): boolean => {
+    const fileName = file.name.toLowerCase();
+    const fileExtension = fileName.split('.').pop() || '';
+    
+    // Check if it's a raw file (explicitly reject)
+    if (RAW_FILE_EXTENSIONS.includes(fileExtension)) {
+      return false;
+    }
+    
+    // Check MIME type first
+    const isValidMimeType = file.type.startsWith('image/') || file.type.startsWith('video/');
+    
+    // Check file extension as backup (some files might not have proper MIME types)
+    const isValidExtension = 
+      ALLOWED_IMAGE_EXTENSIONS.includes(fileExtension) || 
+      ALLOWED_VIDEO_EXTENSIONS.includes(fileExtension);
+    
+    return isValidMimeType && isValidExtension;
+  };
+
+  function handleFileSelect(selectedFiles: FileList | null) {
     if (!selectedFiles) return;
 
-    const newFiles: UploadFile[] = Array.from(selectedFiles)
-      .filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
-      .map((file) => ({
-        file,
-        id: Math.random().toString(36).substr(2, 9),
-        progress: 0,
-        status: 'pending' as const,
-      }));
+    const allFiles = Array.from(selectedFiles);
+    const validFiles: File[] = [];
+    const rejectedFiles: string[] = [];
 
-    if (newFiles.length === 0) {
-      setError('No valid image or video files selected');
-      addNotification('No valid image or video files selected', 'error');
+    // Filter files and track rejected ones
+    allFiles.forEach((file) => {
+      if (isValidFileType(file)) {
+        validFiles.push(file);
+      } else {
+        rejectedFiles.push(file.name);
+      }
+    });
+
+    // Show notification for rejected files
+    if (rejectedFiles.length > 0) {
+      const rejectedMessage = rejectedFiles.length === 1 
+        ? `File "${rejectedFiles[0]}" was rejected (unsupported format or raw file)`
+        : `${rejectedFiles.length} files were rejected (unsupported formats or raw files)`;
+      addNotification(rejectedMessage, 'error');
+    }
+
+    if (validFiles.length === 0) {
+      setError('No valid image or video files selected. Raw files and unsupported formats are not allowed.');
+      addNotification('No valid image or video files selected. Raw files and unsupported formats are not allowed.', 'error');
       return;
+    }
+
+    const newFiles: UploadFile[] = validFiles.map((file) => ({
+      file,
+      id: Math.random().toString(36).substr(2, 9),
+      progress: 0,
+      status: 'pending' as const,
+      startTime: Date.now(),
+      lastLoaded: 0,
+      lastTime: Date.now(),
+      speed: 0,
+    }));
+
+    // Show success message for accepted files
+    if (validFiles.length > 0) {
+      const acceptedMessage = validFiles.length === 1 
+        ? `1 file ready for upload`
+        : `${validFiles.length} files ready for upload`;
+      addNotification(acceptedMessage, 'success');
     }
 
     setUploadFiles(newFiles);
@@ -1122,12 +1199,42 @@ const handleShareSingle = async (item: GalleryItem) => {
       xhr.open('PUT', presignedUrl.url, true);
       xhr.setRequestHeader('Content-Type', fileUpload.file.type);
 
+      let speed = fileUpload.speed || 0;
+
       // Track progress
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
-          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          const loaded = event.loaded;
+          const percentComplete = Math.round((loaded / event.total) * 100);
+          const now = Date.now();
+
+          // Calculate speed (KB/s)
+          if (fileUpload.lastTime && fileUpload.lastLoaded !== undefined) {
+            const timeDiff = (now - fileUpload.lastTime) / 1000; // seconds
+            const bytesDiff = loaded - fileUpload.lastLoaded;
+            if (timeDiff > 0.1 && bytesDiff > 0) {
+              speed = (bytesDiff / timeDiff) / 1024; // KB/s
+            }
+          } else if (fileUpload.startTime) {
+            // Initial speed calculation from start
+            const totalTime = (now - fileUpload.startTime) / 1000;
+            if (totalTime > 0.5) {
+              speed = (loaded / totalTime) / 1024; // KB/s
+            }
+          }
+
           setUploadFiles((prev) =>
-            prev.map((f) => (f.id === fileUpload.id ? { ...f, progress: percentComplete } : f))
+            prev.map((f) =>
+              f.id === fileUpload.id
+                ? {
+                    ...f,
+                    progress: percentComplete,
+                    lastLoaded: loaded,
+                    lastTime: now,
+                    speed: Math.max(0, speed), // Ensure speed is never negative
+                  }
+                : f
+            )
           );
         }
       });
@@ -1165,7 +1272,7 @@ const handleShareSingle = async (item: GalleryItem) => {
 
       // Start upload
       setUploadFiles((prev) =>
-        prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'uploading', progress: 0 } : f))
+        prev.map((f) => (f.id === fileUpload.id ? { ...f, status: 'uploading', progress: 0, lastTime: Date.now(), lastLoaded: 0, speed: 0 } : f))
       );
       xhr.send(fileUpload.file);
     });
@@ -1320,6 +1427,49 @@ const handleShareSingle = async (item: GalleryItem) => {
   };
 
   // -------------------- Render UI --------------------
+  // Upload progress counters - Single consolidated progress bar
+  const completedCount = uploadFiles.filter(f => f.status === 'completed').length;
+  const totalCount = uploadFiles.length;
+  const errorCount = uploadFiles.filter(f => f.status === 'error').length;
+  const uploadingFiles = uploadFiles.filter(f => f.status === 'uploading');
+  const pendingCount = uploadFiles.filter(f => f.status === 'pending').length;
+  
+  // Calculate overall progress including partial progress of uploading files
+  const overallProgress = totalCount > 0 ? 
+    (completedCount + uploadingFiles.reduce((sum, f) => sum + (f.progress || 0) / 100, 0)) / totalCount * 100 : 0;
+  
+  // Calculate combined upload speed and total throughput
+  const uploadingSpeeds = uploadingFiles.map(f => f.speed || 0).filter(speed => speed > 0);
+  const totalUploadSpeed = uploadingSpeeds.reduce((a, b) => a + b, 0);
+  const avgSpeedNum = uploadingSpeeds.length > 0 ? totalUploadSpeed / uploadingSpeeds.length : 0;
+  
+  // Format speeds in appropriate units
+  const formatSpeed = (speedKBps: number) => {
+    if (speedKBps === 0) return '—';
+    if (speedKBps >= 1024) {
+      return `${(speedKBps / 1024).toFixed(1)} MB/s`;
+    }
+    if (speedKBps < 0.1) return '< 0.1 KB/s';
+    return `${speedKBps.toFixed(1)} KB/s`;
+  };
+  
+  const avgSpeed = formatSpeed(avgSpeedNum);
+  const totalSpeed = formatSpeed(totalUploadSpeed);
+  
+  // Calculate estimated time remaining
+  const remainingFiles = totalCount - completedCount;
+  const avgFileSize = uploadingFiles.length > 0 ? 
+    uploadingFiles.reduce((sum, f) => sum + f.file.size, 0) / uploadingFiles.length : 0;
+  const estimatedTimeSeconds = totalUploadSpeed > 0 ? 
+    (remainingFiles * avgFileSize / 1024) / totalUploadSpeed : 0;
+  
+  const formatTime = (seconds: number) => {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
   return (
     <GalleryErrorBoundary>
       <div className="min-h-screen bg-gray-50 flex">
@@ -1405,7 +1555,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg[#e55a00] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#FF9900] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Upload New
@@ -1413,7 +1563,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                 <input
                   type="file"
                   multiple
-                  accept="image/*,video/*"
+                  accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.tiff,.tif,.ico,.mp4,.mov,.avi,.wmv,.mkv,.webm,.flv,.3gp,.m4v"
                   ref={fileInputRef}
                   onChange={(e) => handleFileSelect(e.target.files)}
                   hidden
@@ -1553,7 +1703,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                       </button>
                       <button
                         onClick={handleShare}
-                        className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg hover:bg-[#e55a00] transition-colors duration-200 text-sm"
+                        className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg hover:bg-[#FF9900] transition-colors duration-200 text-sm"
                         disabled={shareLoading}
                       >
                         <Share2 className="w-4 h-4 inline mr-1" />
@@ -1682,182 +1832,192 @@ const handleShareSingle = async (item: GalleryItem) => {
               </div>
             )}
 
-            {/* Upload Progress */}
+            {/* SINGLE UPLOAD PROGRESS BAR WITH DETAILED SPEED INFO */}
             {uploadFiles.length > 0 && (
-              <div className="mb-6 p-4 bg-white rounded-lg shadow-sm border border-gray-100">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Uploading Files</h3>
-                <div className="space-y-2">
-                  {uploadFiles.map((file) => (
-                    <div key={file.id} className="flex items-center space-x-2">
-                      <div className="flex-1">
-                        <p className="text-sm text-gray-600">{file.file.name}</p>
-                        <div className="w-full bg-gray-200 rounded-full h-2.5">
-                          <div
-                            className={`h-2.5 rounded-full ${
-                              file.status === 'error'
-                                ? 'bg-red-500'
-                                : file.status === 'completed'
-                                ? 'bg-green-500'
-                                : 'bg-[#00BCEB]'
-                            }`}
-                            style={{ width: `${file.progress}%` }}
-                          ></div>
-                        </div>
-                        {file.status === 'error' && (
-                          <p className="text-xs text-red-500 mt-1">{file.error}</p>
-                        )}
+              <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 w-[480px] bg-white rounded-lg shadow-xl border border-gray-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                    <div>
+                      <span className="text-sm font-semibold text-gray-800">
+                        Uploading {totalCount} files
+                      </span>
+                      <div className="text-xs text-gray-500">
+                        {completedCount} completed • {uploadingFiles.length} active • {pendingCount} pending
                       </div>
-                      {file.status === 'uploading' && (
-                        <Loader2 className="w-4 h-4 text-[#00BCEB] animate-spin" />
-                      )}
                     </div>
-                  ))}
+                  </div>
+                  <button
+                    onClick={() => setUploadFiles([])}
+                    className="text-xs text-red-600 hover:text-red-800 px-3 py-1 rounded hover:bg-red-50 border border-red-200"
+                  >
+                    Cancel All
+                  </button>
                 </div>
+                
+                {/* SINGLE CONSOLIDATED PROGRESS BAR */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-xs text-gray-600 mb-2">
+                    <span className="font-medium">{completedCount}/{totalCount} files</span>
+                    <span className="font-medium">{Math.round(overallProgress)}% complete</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden shadow-inner">
+                    <div
+                      className={`h-3 rounded-full transition-all duration-500 ease-out relative ${
+                        completedCount === totalCount && errorCount === 0 
+                          ? 'bg-gradient-to-r from-green-500 to-green-600' 
+                          : errorCount > 0 
+                          ? 'bg-gradient-to-r from-red-500 to-red-600' 
+                          : 'bg-gradient-to-r from-blue-500 to-blue-600'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(3, overallProgress))}%` }}
+                    >
+                      <div className="absolute inset-0 bg-white bg-opacity-20 animate-pulse rounded-full"></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DETAILED SPEED AND STATUS INFO */}
+                <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Upload Speed:</span>
+                      <span className="font-medium text-blue-600">
+                        {totalSpeed}
+                        {uploadingFiles.length > 0 && (
+                          <span className="text-xs text-gray-400 ml-1">
+                            ({uploadingSpeeds.length} active)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Avg per File:</span>
+                      <span className="font-medium text-gray-700">{avgSpeed}</span>
+                    </div>
+                    {estimatedTimeSeconds > 0 && remainingFiles > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600">Time Left:</span>
+                        <span className="font-medium text-orange-600">{formatTime(estimatedTimeSeconds)}</span>
+                      </div>
+                    )}
+                    {uploadingFiles.length > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">Debug:</span>
+                        <span className="text-gray-500">
+                          {uploadingFiles.map(f => f.speed?.toFixed(1) || '0').join(', ')} KB/s
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Active:</span>
+                      <span className="font-medium text-blue-600">
+                        {uploadingFiles.length > 0 ? `⬆ ${uploadingFiles.length}` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Errors:</span>
+                      <span className={`font-medium ${errorCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                        {errorCount > 0 ? `❌ ${errorCount}` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Status:</span>
+                      <span className={`font-medium ${
+                        completedCount === totalCount && errorCount === 0 
+                          ? 'text-green-600' 
+                          : uploadingFiles.length > 0 
+                          ? 'text-blue-600' 
+                          : 'text-gray-600'
+                      }`}>
+                        {completedCount === totalCount && errorCount === 0 
+                          ? '✅ Complete' 
+                          : uploadingFiles.length > 0 
+                          ? '🔄 Uploading' 
+                          : '⏸ Paused'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                {completedCount === totalCount && errorCount === 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 text-center">
+                    <span className="text-sm text-green-600 font-medium">
+                      🎉 All {totalCount} files uploaded successfully!
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Content */}
-            {loading ? (
-              <div className="flex justify-center items-center h-64">
-                <Loader2 className="h-8 w-8 text-[#00BCEB] animate-spin" />
-              </div>
-            ) : (
-              <>
-                {folders.length === 0 && filteredImages.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Image className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No media or folders found in this directory.</p>
+            {/* Content with Drag and Drop */}
+            <div
+              className={`relative ${
+                loading ? 'h-64 flex items-center justify-center' : ''
+              } ${dragActive ? 'bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              {dragActive && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 rounded-lg z-10">
+                  <div className="text-center">
+                    <Upload className="h-12 w-12 text-[#00BCEB] mx-auto mb-2" />
+                    <p className="text-[#00BCEB] font-medium">Drop files here to upload</p>
                   </div>
-                ) : (
-                  <div
-                    className={`${
-                      viewMode === 'grid'
-                        ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
-                        : 'space-y-4'
-                    }`}
-                  >
-                    {/* Folders */}
-                    {folders.map((folder) => (
-                      <div
-                        key={folder.path}
-                        className="group relative p-4 bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedItems.includes(folder.path)}
-                          onChange={(e) => handleSelectItem(folder.path, e.target.checked)}
-                          className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                        />
+                </div>
+              )}
+              {loading ? (
+                <Loader2 className="h-8 w-8 text-[#00BCEB] animate-spin" />
+              ) : (
+                <>
+                  {folders.length === 0 && filteredImages.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Image className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No media or folders found in this directory.</p>
+                      <p className="text-sm text-gray-400 mt-2">Drag and drop files here to upload</p>
+                    </div>
+                  ) : (
+                    <div
+                      className={`${
+                        viewMode === 'grid'
+                          ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
+                          : 'space-y-4'
+                      }`}
+                    >
+                      {/* Folders */}
+                      {folders.map((folder) => (
                         <div
-                          onClick={() => handleFolderClick(folder.path)}
-                          className="cursor-pointer flex items-center space-x-3"
+                          key={folder.path}
+                          className="group relative p-4 bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
                         >
-                          <Folder className="h-8 w-8 text-[#00BCEB]" />
-                          <div>
-                            <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
-                              {folder.name}
-                            </p>
-                            <p className="text-sm text-gray-500">Folder</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2 mt-2">
-                          {deleteLoading.includes(folder.path) ? (
-                            <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
-                          ) : (
-                            <button
-                              onClick={() => handleDelete(folder.path)}
-                              className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Images/Videos */}
-                    {filteredImages.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`group relative ${
-                          viewMode === 'grid'
-                            ? 'bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200'
-                            : 'flex items-center space-x-4 p-4 bg-white rounded-lg shadow-sm border border-gray-100'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedItems.includes(item.id)}
-                          onChange={(e) => handleSelectItem(item.id, e.target.checked)}
-                          className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
-                        />
-                        <div
-                          onClick={() => handleImageClick(item)}
-                          className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
-                        >
-                          {item.isVideo ? (
-                            <div className="relative">
-                              <video
-                                src={item.imageUrl}
-                                className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                                onError={handleImageError}
-                                controls={false}
-                              />
-                              <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-white opacity-75" />
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.includes(folder.path)}
+                            onChange={(e) => handleSelectItem(folder.path, e.target.checked)}
+                            className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
+                          />
+                          <div
+                            onClick={() => handleFolderClick(folder.path)}
+                            className="cursor-pointer flex items-center space-x-3"
+                          >
+                            <Folder className="h-8 w-8 text-[#00BCEB]" />
+                            <div>
+                              <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
+                                {folder.name}
+                              </p>
+                              <p className="text-sm text-gray-500">Folder</p>
                             </div>
-                          ) : (
-                            <img
-                              src={item.imageUrl}
-                              alt={item.title}
-                              className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                              onError={handleImageError}
-                            />
-                          )}
-                        </div>
-                        <div
-                          className={
-                            viewMode === 'grid'
-                              ? 'p-4'
-                              : 'flex-1 flex items-center justify-between'
-                          }
-                        >
-                          <div>
-                            <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
-                              {item.title}
-                            </p>
-                            <p className="text-sm text-gray-500">{item.shootType}</p>
-                            <p className="text-sm text-gray-500">{item.eventDate}</p>
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleToggleFavorite(item)}
-                              className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
-                            >
-                              <Star className="w-4 h-4" fill={item.isFavorite ? 'currentColor' : 'none'} />
-                            </button>
-                            <button
-                              onClick={() => handleImageClick(item)}
-                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDownload([item])}
-                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleShareSingle(item)}
-                              className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                            >
-                              <Share2 className="w-4 h-4" />
-                            </button>
-                            {deleteLoading.includes(item.id) ? (
+                          <div className="flex items-center space-x-2 mt-2">
+                            {deleteLoading.includes(folder.path) ? (
                               <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
                             ) : (
                               <button
-                                onClick={() => handleDelete(item.id)}
+                                onClick={() => handleDelete(folder.path)}
                                 className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1865,20 +2025,122 @@ const handleShareSingle = async (item: GalleryItem) => {
                             )}
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </main>
+                      ))}
+
+                      {/* Images/Videos */}
+                      {filteredImages.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`group relative ${
+                            viewMode === 'grid'
+                              ? 'bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200'
+                              : 'flex items-center space-x-4 p-4 bg-white rounded-lg shadow-sm border border-gray-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.includes(item.id)}
+                            onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+                            className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
+                          />
+                          <div
+                            onClick={() => handleImageClick(item)}
+                            className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
+                          >
+                            {item.isVideo ? (
+                              <div className="relative">
+                                <video
+                                  src={item.imageUrl}
+                                  className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
+                                  preload="metadata"
+                                  onError={handleImageError}
+                                  muted
+                                >
+                                  <source src={item.imageUrl} type={item.filename.split('.').pop()?.toLowerCase()} />
+                                  Your browser does not support the video tag.
+                                </video>
+                                <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-white opacity-75" />
+                              </div>
+                            ) : (
+                              <img
+                                src={item.imageUrl}
+                                alt={item.title}
+                                className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
+                                onError={handleImageError}
+                              />
+                            )}
+                          </div>
+                          <div
+                            className={
+                              viewMode === 'grid'
+                                ? 'p-4'
+                                : 'flex-1 flex items-center justify-between'
+                            }
+                          >
+                            <div>
+                              <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
+                                {item.title}
+                              </p>
+                              <p className="text-sm text-gray-500">{item.shootType}</p>
+                              <p className="text-sm text-gray-500">{item.eventDate}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => handleToggleFavorite(item)}
+                                className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
+                              >
+                                <Star className="w-4 h-4" fill={item.isFavorite ? 'currentColor' : 'none'} />
+                              </button>
+                              <button
+                                onClick={() => handleImageClick(item)}
+                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDownload([item])}
+                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleShareSingle(item)}
+                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                              >
+                                <Share2 className="w-4 h-4" />
+                              </button>
+                              {deleteLoading.includes(item.id) ? (
+                                <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
+                              ) : (
+                                <button
+                                  onClick={() => handleDelete(item.id)}
+                                  className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
           {/* Preview Modal */}
           {previewModal.isOpen && previewModal.currentImage && (
-            <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-              <div className="relative max-w-4xl w-full">
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+              onClick={handleClosePreview}
+            >
+              <div 
+                className="relative max-w-4xl w-full"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
-                  onClick={() => setPreviewModal({ isOpen: false, currentImage: null })}
+                  onClick={handleClosePreview}
                   className="absolute top-4 right-4 text-white hover:text-gray-300"
                 >
                   <X className="w-6 h-6" />
@@ -1887,9 +2149,15 @@ const handleShareSingle = async (item: GalleryItem) => {
                   <video
                     src={previewModal.currentImage.imageUrl}
                     controls
-                    className="w-full max-h-[80vh] object-contain rounded-lg"
+                    autoPlay
+                    muted
+                    className="w-full max-h-[80vh] object-contain rounded-lg preview-modal-video"
                     onError={handleImageError}
-                  />
+                    preload="metadata"
+                  >
+                    <source src={previewModal.currentImage.imageUrl} type={previewModal.currentImage.filename.split('.').pop()?.toLowerCase()} />
+                    Your browser does not support the video tag.
+                  </video>
                 ) : (
                   <img
                     src={previewModal.currentImage.imageUrl}
@@ -1912,7 +2180,7 @@ const handleShareSingle = async (item: GalleryItem) => {
                     </button>
                     <button
                       onClick={() => handleShareSingle(previewModal.currentImage!)}
-                      className="px-3 py-1.5 bg[#FF6B00] text-white rounded-lg text-sm"
+                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
                     >
                       <Share2 className="w-4 h-4 inline mr-1" />
                       Share
@@ -2216,8 +2484,9 @@ const handleShareSingle = async (item: GalleryItem) => {
               </div>
             </div>
           )}
-        </div>
+        </main>
       </div>
+    </div>
     </GalleryErrorBoundary>
   );
 }
