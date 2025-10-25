@@ -1,15 +1,3 @@
-/* Full modified Gallery.tsx — every single line included.
-   Changes: simplified share flow to POST-only (no token fallback),
-   robust response parsing, clearer errors/logging.
-   Additional Changes: Handle 3000+ uploads by batching presigned URL requests (200 files/batch),
-   concurrent uploads with concurrency limit (20 simultaneous), XMLHttpRequest for progress tracking.
-   Download Changes: Use actual filename with extension from S3 key for accurate local saving.
-   CORS Download Fix: If fetch fails due to CORS, create temporary <a> tag with download attribute to trigger browser download without new tab.
-   Loader Additions: Added loading indicators for folder creation, share generation, bulk download, image list fetching, and other operations.
-   Upload UI Changes: Replaced individual file progress bars with a single overall progress bar showing completed/total count (e.g., 5/100), updating incrementally as each upload completes. Added error count display if applicable.
-   New Changes: Added drag-and-drop upload support to the gallery area with visual feedback (drop zone overlay). Added upload speed calculation and display in the progress section (e.g., "1.2 MB/s"). Smoothed progress bar animations with CSS transitions. Enhanced video display in gallery with proper thumbnail generation using <video> preload="metadata" and poster fallback. Improved video player in preview modal with full controls, autoplay on open (muted), and better error handling.
-*/
-
 import React, { useState, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
@@ -38,6 +26,7 @@ import {
   Star,
   Heart,
   ChevronRight,
+  ChevronLeft,
   Home,
   X,
   Copy,
@@ -175,6 +164,7 @@ function Gallery() {
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false); // New: Loader for bulk download
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
   const [dragActive, setDragActive] = useState(false); // For drag and drop
+  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
 
   const shootTypes = [
     'Wedding',
@@ -776,27 +766,96 @@ const handleShare = async () => {
     setPreviewModal({ isOpen: false, currentImage: null });
   };
 
-  // Handle keyboard events for modal
+  // Navigate between images in preview modal
+  const navigatePreview = (direction: 'prev' | 'next') => {
+    if (!previewModal.currentImage) return;
+    
+    const currentIndex = filteredImages.findIndex(item => item.id === previewModal.currentImage!.id);
+    let newIndex;
+    
+    if (direction === 'prev') {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : filteredImages.length - 1;
+    } else {
+      newIndex = currentIndex < filteredImages.length - 1 ? currentIndex + 1 : 0;
+    }
+    
+    const newImage = filteredImages[newIndex];
+    if (newImage) {
+      setPreviewModal({ isOpen: true, currentImage: newImage });
+    }
+  };
+
+  // Enhanced keyboard navigation
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && previewModal.isOpen) {
-        handleClosePreview();
+      // Prevent shortcuts when typing in inputs
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (event.key) {
+        case 'Escape':
+          if (previewModal.isOpen) {
+            handleClosePreview();
+          } else if (selectedItems.length > 0) {
+            handleClearSelection();
+          }
+          break;
+        
+        case 'Delete':
+        case 'Backspace':
+          if (selectedItems.length > 0) {
+            event.preventDefault();
+            handleBulkDelete();
+          }
+          break;
+        
+        case ' ':
+        case 'Spacebar':
+          if (selectedItems.length === 1 && !previewModal.isOpen) {
+            event.preventDefault();
+            const selectedItem = items.find(item => item.id === selectedItems[0]);
+            if (selectedItem) {
+              handleImageClick(selectedItem);
+            }
+          }
+          break;
+        
+        case 'ArrowLeft':
+          if (previewModal.isOpen && previewModal.currentImage) {
+            event.preventDefault();
+            navigatePreview('prev');
+          }
+          break;
+        
+        case 'ArrowRight':
+          if (previewModal.isOpen && previewModal.currentImage) {
+            event.preventDefault();
+            navigatePreview('next');
+          }
+          break;
+        
+        case 'a':
+        case 'A':
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            handleSelectAll();
+          }
+          break;
+        
+        case 'd':
+        case 'D':
+          if (selectedItems.length > 0 && !previewModal.isOpen) {
+            event.preventDefault();
+            handleBulkDownload();
+          }
+          break;
       }
     };
 
-    if (previewModal.isOpen) {
-      document.addEventListener('keydown', handleKeyDown);
-      return () => document.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [previewModal.isOpen]);
-
-  const handleSelectItem = (id: string, checked: boolean) => {
-    if (checked) {
-      setSelectedItems((prev) => [...prev, id]);
-    } else {
-      setSelectedItems((prev) => prev.filter((itemId) => itemId !== id));
-    }
-  };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [previewModal.isOpen, selectedItems, items, filteredImages]);
 
   const handleSelectAll = () => {
     const allIds = [
@@ -822,6 +881,14 @@ const handleShare = async () => {
 
   const handleClearSelection = () => {
     setSelectedItems([]);
+  };
+
+  const handleSelectItem = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedItems((prev) => [...prev, id]);
+    } else {
+      setSelectedItems((prev) => prev.filter((itemId) => itemId !== id));
+    }
   };
 
   // Compatibility wrapper used on per-item download button
@@ -1054,6 +1121,24 @@ const handleShare = async () => {
       }
     }
   };
+
+  // Optimized image loading handler
+  const handleImageLoad = (itemId: string) => {
+    setLoadedImages(prev => new Set([...prev, itemId]));
+  };
+
+
+  // Create optimized image URL with compression hints
+  const getOptimizedImageUrl = (originalUrl: string, isGrid: boolean = true) => {
+    // If the URL already has query parameters, append to them, otherwise start fresh
+    const separator = originalUrl.includes('?') ? '&' : '?';
+    const width = isGrid ? 400 : 150; // Smaller for list view
+    const quality = 80; // Good balance between quality and size
+    
+    // Add compression hints (works with many CDNs and image services)
+    return `${originalUrl}${separator}w=${width}&q=${quality}&f=webp&fit=cover`;
+  };
+
 
   // -------------------- Create folder --------------------
   const handleCreateFolder = async () => {
@@ -1455,14 +1540,29 @@ const handleShare = async () => {
   
   const avgSpeed = formatSpeed(avgSpeedNum);
   const totalSpeed = formatSpeed(totalUploadSpeed);
-  
-  // Calculate estimated time remaining
+
+  // Calculate file sizes and estimated time remaining
+  const totalBytes = uploadFiles.reduce((sum, f) => sum + f.file.size, 0);
+  const completedBytes = uploadFiles
+    .filter(f => f.status === 'completed')
+    .reduce((sum, f) => sum + f.file.size, 0);
+  const uploadingBytes = uploadingFiles.reduce((sum, f) => sum + (f.file.size * (f.progress || 0) / 100), 0);
+  const processedBytes = completedBytes + uploadingBytes;
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  };
+
   const remainingFiles = totalCount - completedCount;
   const avgFileSize = uploadingFiles.length > 0 ? 
     uploadingFiles.reduce((sum, f) => sum + f.file.size, 0) / uploadingFiles.length : 0;
   const estimatedTimeSeconds = totalUploadSpeed > 0 ? 
     (remainingFiles * avgFileSize / 1024) / totalUploadSpeed : 0;
-  
+
   const formatTime = (seconds: number) => {
     if (seconds < 60) return `${Math.round(seconds)}s`;
     const minutes = Math.floor(seconds / 60);
@@ -1472,9 +1572,24 @@ const handleShare = async () => {
 
   return (
     <GalleryErrorBoundary>
-      <div className="min-h-screen bg-gray-50 flex">
+      <style>{`
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .animate-shimmer {
+          animation: shimmer 2s infinite linear;
+        }
+        @keyframes slide-up {
+          0% { transform: translateY(100%) translateX(-50%); opacity: 0; }
+          100% { transform: translateY(0) translateX(-50%); opacity: 1; }
+        }
+        .animate-slide-up {
+          animation: slide-up 0.3s ease-out;
+        }
+      `}</style>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex">
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-
         <div className={`flex-1 transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
           <Header title="Gallery Management" sidebarCollapsed={sidebarCollapsed} />
 
@@ -1634,99 +1749,19 @@ const handleShare = async () => {
                       Select All
                     </button>
                   )}
-                </div>
 
-                <div className="flex items-center space-x-3">
-                  {/* Quick Actions for Images */}
-                  {filteredImages.length > 0 && (
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={handleSelectAllImages}
-                        className="flex items-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors duration-200 text-sm"
-                      >
-                        <Image className="w-4 h-4 mr-1" />
-                        Select All Images
-                      </button>
-                      <button
-                        onClick={handleCopyAllImageNames}
-                        className="flex items-center px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors duration-200 text-sm"
-                      >
-                        <Copy className="w-4 h-4 mr-1" />
-                        Copy All Names
-                      </button>
-                    </div>
-                  )}
-                  
-                  {/* Selection Info */}
+                  {/* View Selected Images Button */}
                   {selectedItems.length > 0 && (
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-600">{selectedItems.length} selected</span>
-                      
-                      {/* Show Image List button for client selection folders */}
-                      {selectedItems.length === 1 && 
-                       folders.some(f => f.path === selectedItems[0] && (f.path.includes('client') || f.path.includes('selection'))) && (
-                        <button
-                          onClick={() => {
-                            const selectedFolder = folders.find(f => f.path === selectedItems[0]);
-                            if (selectedFolder) {
-                              handleShowImageList(selectedFolder.path, selectedFolder.name);
-                            }
-                          }}
-                          className="flex items-center px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm"
-                          disabled={imageListLoading}
-                        >
-                          <Eye className="w-4 h-4 inline mr-1" />
-                          View Image List
-                          {imageListLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
-                        </button>
-                      )}
-                      
-                      {/* Show Selected Images button when multiple images are selected */}
-                      {selectedItems.filter(id => !id.startsWith('/')).length > 0 && (
-                        <button
-                          onClick={handleShowSelectedImages}
-                          className="flex items-center px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm"
-                        >
-                          <Image className="w-4 h-4 inline mr-1" />
-                          View Selected Images
-                        </button>
-                      )}
-                      
-                      <button
-                        onClick={handleBulkDownload}
-                        className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 text-sm"
-                        disabled={bulkDownloadLoading}
-                      >
-                        <Download className="w-4 h-4 inline mr-1" />
-                        Download
-                        {bulkDownloadLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
-                      </button>
-                      <button
-                        onClick={handleShare}
-                        className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg hover:bg-[#FF9900] transition-colors duration-200 text-sm"
-                        disabled={shareLoading}
-                      >
-                        <Share2 className="w-4 h-4 inline mr-1" />
-                        Share
-                        {shareLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
-                      </button>
-                      <button
-                        onClick={handleBulkDelete}
-                        className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200 text-sm"
-                      >
-                        <Trash2 className="w-4 h-4 inline mr-1" />
-                        Delete
-                      </button>
-                      <button
-                        onClick={handleClearSelection}
-                        className="p-1.5 text-gray-500 hover:text-gray-700"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setSelectedImagesModal({ isOpen: true, images: selectedItems.filter(id => items.some(item => item.id === id)).map(id => items.find(item => item.id === id)?.title || id) })}
+                      className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View Selected ({selectedItems.length})
+                    </button>
                   )}
 
-                  {/* View Mode */}
+                  {/* View Mode Toggle */}
                   <div className="flex border border-gray-200 rounded-lg">
                     <button
                       onClick={() => setViewMode('grid')}
@@ -1840,7 +1875,7 @@ const handleShare = async () => {
                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
                     <div>
                       <span className="text-sm font-semibold text-gray-800">
-                        Uploading {totalCount} files
+                        Uploading {totalCount} files ({formatBytes(totalBytes)})
                       </span>
                       <div className="text-xs text-gray-500">
                         {completedCount} completed • {uploadingFiles.length} active • {pendingCount} pending
@@ -1860,6 +1895,10 @@ const handleShare = async () => {
                   <div className="flex justify-between text-xs text-gray-600 mb-2">
                     <span className="font-medium">{completedCount}/{totalCount} files</span>
                     <span className="font-medium">{Math.round(overallProgress)}% complete</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <span>{formatBytes(processedBytes)} / {formatBytes(totalBytes)}</span>
+                    <span>Data transferred</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden shadow-inner">
                     <div
@@ -1971,14 +2010,41 @@ const handleShare = async () => {
                 </div>
               )}
               {loading ? (
-                <Loader2 className="h-8 w-8 text-[#00BCEB] animate-spin" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {/* Skeleton Loading Animation */}
+                  {Array.from({ length: 12 }).map((_, index) => (
+                    <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-pulse">
+                      <div className="w-full h-48 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer"></div>
+                      <div className="p-4 space-y-3">
+                        <div className="h-4 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded"></div>
+                        <div className="h-3 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded w-3/4"></div>
+                        <div className="h-3 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded w-1/2"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <>
                   {folders.length === 0 && filteredImages.length === 0 ? (
-                    <div className="text-center py-12">
-                      <Image className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-500">No media or folders found in this directory.</p>
-                      <p className="text-sm text-gray-400 mt-2">Drag and drop files here to upload</p>
+                    <div className="text-center py-20">
+                      <div className="relative">
+                        <div className="w-32 h-32 mx-auto mb-6 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full flex items-center justify-center">
+                          <Image className="h-16 w-16 text-gray-400" />
+                        </div>
+                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-32 h-32 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full animate-ping opacity-20"></div>
+                      </div>
+                      <h3 className="text-xl font-semibold text-gray-700 mb-2">No media found</h3>
+                      <p className="text-gray-500 mb-4">This directory is empty. Start by uploading some images or videos.</p>
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                        >
+                          <Upload className="h-5 w-5 mr-2" />
+                          Upload Files
+                        </button>
+                        <p className="text-sm text-gray-400">or drag and drop files here</p>
+                      </div>
                     </div>
                   ) : (
                     <div
@@ -1992,24 +2058,39 @@ const handleShare = async () => {
                       {folders.map((folder) => (
                         <div
                           key={folder.path}
-                          className="group relative p-4 bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
+                          className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${
+                            selectedItems.includes(folder.path) 
+                              ? 'ring-2 ring-blue-500 ring-offset-2' 
+                              : ''
+                          }`}
                         >
+                          <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full -translate-y-10 translate-x-10 opacity-50"></div>
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(folder.path)}
                             onChange={(e) => handleSelectItem(folder.path, e.target.checked)}
-                            className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
+                            className="absolute top-3 right-3 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
                           />
                           <div
                             onClick={() => handleFolderClick(folder.path)}
-                            className="cursor-pointer flex items-center space-x-3"
+                            className="cursor-pointer flex items-center space-x-4"
                           >
-                            <Folder className="h-8 w-8 text-[#00BCEB]" />
-                            <div>
-                              <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
+                            <div className="relative">
+                              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                                <Folder className="h-6 w-6 text-white" />
+                              </div>
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-400 rounded-full flex items-center justify-center">
+                                <span className="text-xs font-bold text-yellow-800">📁</span>
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <p className="font-semibold text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200 text-lg">
                                 {folder.name}
                               </p>
-                              <p className="text-sm text-gray-500">Folder</p>
+                              <p className="text-sm text-gray-500 flex items-center mt-1">
+                                <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                                Folder
+                              </p>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2 mt-2">
@@ -2032,16 +2113,20 @@ const handleShare = async () => {
                         <div
                           key={item.id}
                           className={`group relative ${
+                            selectedItems.includes(item.id) 
+                              ? 'ring-2 ring-blue-500 ring-offset-2' 
+                              : ''
+                          } ${
                             viewMode === 'grid'
-                              ? 'bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200'
-                              : 'flex items-center space-x-4 p-4 bg-white rounded-lg shadow-sm border border-gray-100'
+                              ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
+                              : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(item.id)}
                             onChange={(e) => handleSelectItem(item.id, e.target.checked)}
-                            className="absolute top-2 right-2 h-4 w-4 text-[#00BCEB] focus:ring-[#00BCEB] border-gray-200 rounded"
+                            className="absolute top-2 right-2 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
                           />
                           <div
                             onClick={() => handleImageClick(item)}
@@ -2052,22 +2137,61 @@ const handleShare = async () => {
                                 <video
                                   src={item.imageUrl}
                                   className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                                  preload="metadata"
+                                  preload="none"
                                   onError={handleImageError}
                                   muted
+                                  poster={item.imageUrl + '#t=0.1'}
+                                  style={{ 
+                                    backgroundColor: '#f3f4f6',
+                                    minHeight: viewMode === 'grid' ? '192px' : '96px'
+                                  }}
                                 >
-                                  <source src={item.imageUrl} type={item.filename.split('.').pop()?.toLowerCase()} />
+                                  <source src={item.imageUrl} type={`video/${item.filename.split('.').pop()?.toLowerCase()}`} />
                                   Your browser does not support the video tag.
                                 </video>
-                                <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-white opacity-75" />
+                                <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-black opacity-75" />
+                                
+                                {/* Video Badges */}
+                                {viewMode === 'grid' && (
+                                  <div className="absolute bottom-2 left-2 flex space-x-1">
+                                    <span className="px-2 py-1 bg-red-600 text-white text-xs font-medium rounded-full shadow-lg">
+                                      VIDEO
+                                    </span>
+                                    {item.isFavorite && (
+                                      <span className="px-2 py-1 bg-yellow-500 text-white text-xs font-medium rounded-full shadow-lg">
+                                        ⭐
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             ) : (
-                              <img
-                                src={item.imageUrl}
-                                alt={item.title}
-                                className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
-                                onError={handleImageError}
-                              />
+                              <div className="relative">
+                                <img
+                                  src={getOptimizedImageUrl(item.imageUrl, viewMode === 'grid')}
+                                  alt={item.title}
+                                  className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
+                                  onError={handleImageError}
+                                  onLoad={() => handleImageLoad(item.id)}
+                                  loading="lazy"
+                                  decoding="async"
+                                  style={{ 
+                                    backgroundColor: '#f3f4f6',
+                                    minHeight: viewMode === 'grid' ? '192px' : '96px',
+                                    transition: 'opacity 0.3s ease-in-out',
+                                    opacity: loadedImages.has(item.id) ? 1 : 0.7
+                                  }}
+                                />
+                                
+                                {/* Image Badges */}
+                                {viewMode === 'grid' && item.isFavorite && (
+                                  <div className="absolute bottom-2 left-2 flex space-x-1">
+                                    <span className="px-2 py-1 bg-yellow-500 text-white text-xs font-medium rounded-full shadow-lg">
+                                      ⭐
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                           <div
@@ -2129,6 +2253,60 @@ const handleShare = async () => {
               )}
             </div>
 
+            {/* Floating Bulk Actions Toolbar */}
+            {selectedItems.length > 0 && (
+              <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40">
+                <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 px-6 py-4 flex items-center space-x-4 animate-slide-up">
+                  <div className="flex items-center space-x-2 text-sm font-medium text-gray-700">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <span className="text-blue-600 font-bold text-xs">{selectedItems.length}</span>
+                    </div>
+                    <span>{selectedItems.length} item{selectedItems.length > 1 ? 's' : ''} selected</span>
+                  </div>
+                  
+                  <div className="w-px h-6 bg-gray-300"></div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleBulkDownload()}
+                      disabled={bulkDownloadLoading}
+                      className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Download
+                      {bulkDownloadLoading && <Loader2 className="ml-2 w-4 h-4 animate-spin" />}
+                    </button>
+                    
+                    <button
+                      onClick={() => handleShare()}
+                      disabled={shareLoading}
+                      className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      <Share2 className="w-4 h-4 mr-2" />
+                      Share
+                      {shareLoading && <Loader2 className="ml-2 w-4 h-4 animate-spin" />}
+                    </button>
+                    
+                    <button
+                      onClick={() => handleBulkDelete()}
+                      className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </button>
+                    
+                    <button
+                      onClick={handleClearSelection}
+                      className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 text-sm font-medium"
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           {/* Preview Modal */}
           {previewModal.isOpen && previewModal.currentImage && (
             <div 
@@ -2139,9 +2317,30 @@ const handleShare = async () => {
                 className="relative max-w-4xl w-full"
                 onClick={(e) => e.stopPropagation()}
               >
+                {/* Navigation Arrows */}
+                {filteredImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => navigatePreview('prev')}
+                      className="absolute left-4 top-1/2 transform -translate-y-1/2 z-10 bg-black bg-opacity-50 hover:bg-opacity-70 text-white rounded-full p-3 transition-all duration-200 group"
+                      title="Previous (←)"
+                    >
+                      <ChevronLeft className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    </button>
+                    <button
+                      onClick={() => navigatePreview('next')}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 z-10 bg-black bg-opacity-50 hover:bg-opacity-70 text-white rounded-full p-3 transition-all duration-200 group"
+                      title="Next (→)"
+                    >
+                      <ChevronRight className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    </button>
+                  </>
+                )}
+                
                 <button
                   onClick={handleClosePreview}
-                  className="absolute top-4 right-4 text-white hover:text-gray-300"
+                  className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 hover:bg-opacity-70 text-white rounded-full p-2 transition-all duration-200"
+                  title="Close (Esc)"
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -2420,10 +2619,10 @@ const handleShare = async () => {
                 
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-sm text-gray-600">
-                    {selectedImagesModal.images.length} image{selectedImagesModal.images.length !== 1 ? 's' : ''} selected
+                    {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected
                   </p>
                   <button
-                    onClick={() => copyImageListToClipboard(selectedImagesModal.images)}
+                    onClick={() => copyImageListToClipboard(selectedItems.map(id => items.find(item => item.id === id)?.title || id))}
                     className="flex items-center px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm"
                   >
                     <Copy className="w-4 h-4 mr-1" />
@@ -2432,7 +2631,7 @@ const handleShare = async () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
-                  {selectedImagesModal.images.length === 0 ? (
+                  {selectedItems.length === 0 ? (
                     <div className="flex items-center justify-center h-32 text-gray-500">
                       <div className="text-center">
                         <Image className="h-8 w-8 mx-auto mb-2 text-gray-400" />
@@ -2441,52 +2640,125 @@ const handleShare = async () => {
                     </div>
                   ) : (
                     <div className="p-4">
-                      <div className="space-y-2">
-                        {selectedImagesModal.images.map((imageName, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between p-2 bg-gray-50 rounded border hover:bg-gray-100 transition-colors duration-200"
-                          >
-                            <div className="flex items-center space-x-3">
-                              <Image className="h-4 w-4 text-purple-500" />
-                              <span className="text-sm font-medium text-gray-700">
-                                {imageName}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => copyToClipboard(imageName)}
-                              className="p-1 text-gray-400 hover:text-purple-600 transition-colors duration-200"
-                              title="Copy image name"
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {selectedItems.map((itemId) => {
+                          const item = items.find(i => i.id === itemId);
+                          if (!item) return null;
+                          return (
+                            <div
+                              key={item.id}
+                              className="group relative bg-white rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200 overflow-hidden"
                             >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
+                              <div
+                                onClick={() => {
+                                  setSelectedImagesModal({ isOpen: false, images: [] });
+                                  handleImageClick(item);
+                                }}
+                                className="cursor-pointer"
+                              >
+                                {item.isVideo ? (
+                                  <div className="relative">
+                                    <video
+                                      src={item.imageUrl}
+                                      className="w-full h-32 object-cover"
+                                      preload="none"
+                                      muted
+                                      poster={item.imageUrl + '#t=0.1'}
+                                    />
+                                    <Play className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-6 w-6 text-white opacity-75" />
+                                    <span className="absolute top-2 left-2 px-2 py-1 bg-red-600 text-white text-xs font-medium rounded-full">
+                                      VIDEO
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="relative">
+                                    <img
+                                      src={getOptimizedImageUrl(item.imageUrl, true)}
+                                      alt={item.title}
+                                      className="w-full h-32 object-cover"
+                                      loading="lazy"
+                                    />
+                                    {item.isFavorite && (
+                                      <span className="absolute top-2 left-2 px-2 py-1 bg-yellow-500 text-white text-xs font-medium rounded-full">
+                                        ⭐
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-3">
+                                <p className="font-medium text-gray-800 text-sm truncate">{item.title}</p>
+                                <p className="text-xs text-gray-500">{item.shootType}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
 
-                <div className="flex justify-end space-x-2 mt-4">
+          {/* Create Folder Modal */}
+          {createFolderModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-[#2D2D2D]">Create New Folder</h3>
                   <button
-                    onClick={() => setSelectedImagesModal({ isOpen: false, images: [] })}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                    onClick={() => {
+                      setCreateFolderModal(false);
+                      setNewFolderName('');
+                    }}
+                    className="text-gray-500 hover:text-gray-700"
                   >
-                    Close
+                    <X className="w-5 h-5" />
                   </button>
-                  <button
-                    onClick={() => copyImageListToClipboard(selectedImagesModal.images)}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                  >
-                    Copy All Names
-                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
+                    <input
+                      type="text"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder="Enter folder name"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB] focus:border-transparent"
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          handleCreateFolder();
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-end space-x-3">
+                    <button
+                      onClick={() => {
+                        setCreateFolderModal(false);
+                        setNewFolderName('');
+                      }}
+                      className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors duration-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleCreateFolder}
+                      disabled={createFolderLoading || !newFolderName.trim()}
+                      className="flex items-center px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {createFolderLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Create Folder
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
         </main>
+        </div>
       </div>
-    </div>
     </GalleryErrorBoundary>
   );
 }
