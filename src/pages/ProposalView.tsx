@@ -682,9 +682,9 @@ function ProposalView() {
                         <div>
                           <h3 className="text-xl font-bold mb-2">{item.name}</h3>
                           <p className="text-sm text-gray-300 mb-2">{getDeliverableDescription(item.name, item)}</p>
-                          {item.qty && item.qty > 0 && (
+                          {/* {item.qty && item.qty > 0 && (
                             <p className="text-sm text-gray-200">Quantity: {item.qty}</p>
-                          )}
+                          )} */}
                         </div>
                       </div>
                     </div>
