@@ -1,3 +1,27 @@
+  // Drag and drop reordering for compact grid
+  const handleDragStartItem = (id: string) => setDragId(id);
+  const handleDragOverItem = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+  const handleDropOnItem = (targetId: string) => {
+    if (!dragId || dragId === targetId) return;
+    setSortBy('custom');
+    setItems((prev) => {
+      const idsInView = new Set(filteredImages.map((i) => i.id));
+      const currentOrder = filteredImages.map((i) => i.id);
+      const from = currentOrder.indexOf(dragId);
+      const to = currentOrder.indexOf(targetId);
+      if (from === -1 || to === -1) return prev;
+      const newOrder = [...currentOrder];
+      const [moved] = newOrder.splice(from, 1);
+      newOrder.splice(to, 0, moved);
+      const orderMap = new Map<string, number>();
+      newOrder.forEach((id, i) => orderMap.set(id, i));
+      return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
+    });
+    setDragId(null);
+  };
+
 import React, { useState, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
@@ -50,6 +74,7 @@ interface GalleryItem {
   isFavorite?: boolean;
   key?: string;
   isVideo?: boolean;
+  order?: number; // for custom manual ordering
 }
 
 interface FolderItem {
@@ -165,6 +190,7 @@ function Gallery() {
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
+  const [dragId, setDragId] = useState<string | null>(null);
 
   const shootTypes = [
     'Wedding',
@@ -190,6 +216,9 @@ function Gallery() {
     'November',
     'December',
   ];
+
+  // When inside a folder, show a compact, uniform thumbnail grid like Image 2
+  const compactView = currentPath.split('/').filter(Boolean).length > 0;
 
   // -------------------- Notifications --------------------
   const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
@@ -261,7 +290,7 @@ function Gallery() {
         throw new Error('Unexpected API response format');
       }
 
-      const mappedItems: GalleryItem[] = data.files.map((item: any) => {
+      const mappedItems: GalleryItem[] = data.files.map((item: any, idx: number) => {
         const keyParts = item.key.split('/');
         const rawFilename = keyParts.pop() || 'Untitled.jpg';
         const title = rawFilename.replace(/\.[^/.]+$/, '');
@@ -287,6 +316,7 @@ function Gallery() {
           isFavorite: false,
           key: item.key,
           isVideo,
+          order: idx,
         };
       });
 
@@ -699,6 +729,10 @@ const handleShare = async () => {
       let aValue: any, bValue: any;
 
       switch (sortBy) {
+        case 'custom':
+          aValue = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+          bValue = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+          break;
         case 'title':
           aValue = a.title.toLowerCase();
           bValue = b.title.toLowerCase();
@@ -2010,7 +2044,9 @@ const handleShare = async () => {
                 </div>
               )}
               {loading ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div className={compactView ?
+                  "columns-2 md:columns-3 gap-3" :
+                  "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"}>
                   {/* Skeleton Loading Animation */}
                   {Array.from({ length: 12 }).map((_, index) => (
                     <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-pulse">
@@ -2050,19 +2086,21 @@ const handleShare = async () => {
                     <div
                       className={`${
                         viewMode === 'grid'
-                          ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
+                          ? compactView
+                            ? 'columns-2 md:columns-3 gap-3'
+                            : 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
                           : 'space-y-4'
                       }`}
                     >
                       {/* Folders */}
-                      {folders.map((folder) => (
+                      {!compactView && folders.map((folder) => (
                         <div
                           key={folder.path}
                           className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${
                             selectedItems.includes(folder.path) 
                               ? 'ring-2 ring-blue-500 ring-offset-2' 
                               : ''
-                          }`}
+                          } ${compactView ? '' : ''}`}
                         >
                           <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full -translate-y-10 translate-x-10 opacity-50"></div>
                           <input
@@ -2113,14 +2151,18 @@ const handleShare = async () => {
                         <div
                           key={item.id}
                           className={`group relative ${
-                            selectedItems.includes(item.id) 
-                              ? 'ring-2 ring-blue-500 ring-offset-2' 
-                              : ''
+                            selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
                           } ${
-                            viewMode === 'grid'
-                              ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
-                              : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200'
+                            compactView && viewMode === 'grid'
+                              ? 'rounded-lg overflow-hidden break-inside-avoid inline-block w-full mb-3'
+                              : (viewMode === 'grid'
+                                  ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
+                                  : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
+                          draggable={compactView && viewMode === 'grid'}
+                          onDragStart={() => handleDragStartItem(item.id)}
+                          onDragOver={handleDragOverItem}
+                          onDrop={() => handleDropOnItem(item.id)}
                         >
                           <input
                             type="checkbox"
@@ -2136,15 +2178,12 @@ const handleShare = async () => {
                               <div className="relative">
                                 <video
                                   src={item.imageUrl}
-                                  className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
+                                  className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   preload="none"
                                   onError={handleImageError}
                                   muted
                                   poster={item.imageUrl + '#t=0.1'}
-                                  style={{ 
-                                    backgroundColor: '#f3f4f6',
-                                    minHeight: viewMode === 'grid' ? '192px' : '96px'
-                                  }}
+                                  style={{ backgroundColor: '#f3f4f6' }}
                                 >
                                   <source src={item.imageUrl} type={`video/${item.filename.split('.').pop()?.toLowerCase()}`} />
                                   Your browser does not support the video tag.
@@ -2168,16 +2207,16 @@ const handleShare = async () => {
                             ) : (
                               <div className="relative">
                                 <img
-                                  src={getOptimizedImageUrl(item.imageUrl, viewMode === 'grid')}
+                                  src={compactView && viewMode === 'grid' ? item.imageUrl : getOptimizedImageUrl(item.imageUrl, viewMode === 'grid')}
                                   alt={item.title}
-                                  className={viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg'}
+                                  className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   onError={handleImageError}
                                   onLoad={() => handleImageLoad(item.id)}
                                   loading="lazy"
                                   decoding="async"
                                   style={{ 
                                     backgroundColor: '#f3f4f6',
-                                    minHeight: viewMode === 'grid' ? '192px' : '96px',
+                                    minHeight: compactView && viewMode === 'grid' ? undefined : (viewMode === 'grid' ? '192px' : '96px'),
                                     transition: 'opacity 0.3s ease-in-out',
                                     opacity: loadedImages.has(item.id) ? 1 : 0.7
                                   }}
@@ -2194,57 +2233,59 @@ const handleShare = async () => {
                               </div>
                             )}
                           </div>
-                          <div
-                            className={
-                              viewMode === 'grid'
-                                ? 'p-4'
-                                : 'flex-1 flex items-center justify-between'
-                            }
-                          >
-                            <div>
-                              <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
-                                {item.title}
-                              </p>
-                              <p className="text-sm text-gray-500">{item.shootType}</p>
-                              <p className="text-sm text-gray-500">{item.eventDate}</p>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <button
-                                onClick={() => handleToggleFavorite(item)}
-                                className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
-                              >
-                                <Star className="w-4 h-4" fill={item.isFavorite ? 'currentColor' : 'none'} />
-                              </button>
-                              <button
-                                onClick={() => handleImageClick(item)}
-                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDownload([item])}
-                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                              >
-                                <Download className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleShareSingle(item)}
-                                className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
-                              >
-                                <Share2 className="w-4 h-4" />
-                              </button>
-                              {deleteLoading.includes(item.id) ? (
-                                <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
-                              ) : (
+                          {!(compactView && viewMode === 'grid') && (
+                            <div
+                              className={
+                                viewMode === 'grid'
+                                  ? 'p-4'
+                                  : 'flex-1 flex items-center justify-between'
+                              }
+                            >
+                              <div>
+                                <p className="font-medium text-[#2D2D2D] group-hover:text-[#00BCEB] transition-colors duration-200">
+                                  {item.title}
+                                </p>
+                                <p className="text-sm text-gray-500">{item.shootType}</p>
+                                <p className="text-sm text-gray-500">{item.eventDate}</p>
+                              </div>
+                              <div className="flex items-center space-x-2">
                                 <button
-                                  onClick={() => handleDelete(item.id)}
-                                  className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                                  onClick={() => handleToggleFavorite(item)}
+                                  className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Star className="w-4 h-4" fill={item.isFavorite ? 'currentColor' : 'none'} />
                                 </button>
-                              )}
+                                <button
+                                  onClick={() => handleImageClick(item)}
+                                  className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDownload([item])}
+                                  className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleShareSingle(item)}
+                                  className="p-1.5 text-gray-400 hover:text-[#00BCEB] transition-colors duration-200"
+                                >
+                                  <Share2 className="w-4 h-4" />
+                                </button>
+                                {deleteLoading.includes(item.id) ? (
+                                  <Loader2 className="w-4 h-4 text-red-500 animate-spin" />
+                                ) : (
+                                  <button
+                                    onClick={() => handleDelete(item.id)}
+                                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       ))}
                     </div>
