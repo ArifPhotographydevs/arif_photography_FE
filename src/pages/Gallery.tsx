@@ -82,6 +82,16 @@ interface FolderItem {
   path: string;
 }
 
+type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'none';
+
+interface WatermarkPreset {
+  id: string;
+  imageUrl: string; // Base64 or URL of watermark image
+  imageName: string; // Name of the watermark image
+  position: WatermarkPosition;
+  lastUsed: number;
+}
+
 interface UploadFile {
   file: File;
   id: string;
@@ -92,6 +102,8 @@ interface UploadFile {
   lastLoaded?: number; // For speed calculation
   lastTime?: number; // For speed calculation
   speed?: number; // Current upload speed in KB/s
+  watermarkPosition?: WatermarkPosition; // Watermark position for this file
+  processedFile?: File; // File after watermark is applied
 }
 
 interface DeleteError {
@@ -167,7 +179,21 @@ function Gallery() {
   const [showFilters, setShowFilters] = useState(false);
   const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; currentImage: GalleryItem | null; }>({ isOpen: false, currentImage: null });
-  const [shareModal, setShareModal] = useState<{ isOpen: boolean; links: string[]; serverMessage?: string | null }>({ isOpen: false, links: [], serverMessage: null });
+  const [shareModal, setShareModal] = useState<{ 
+    isOpen: boolean; 
+    links: string[]; 
+    serverMessage?: string | null;
+    sharePin?: string;
+  }>({ isOpen: false, links: [], serverMessage: null, sharePin: '' });
+  const [sharePin, setSharePin] = useState('');
+  const [activeShareLinks, setActiveShareLinks] = useState<Array<{
+    id: string;
+    link: string;
+    createdAt: number;
+    hasPin: boolean;
+    isActive: boolean;
+    items: string[];
+  }>>([]);
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [imageListModal, setImageListModal] = useState<{ isOpen: boolean; folderName: string; images: string[] }>({ isOpen: false, folderName: '', images: [] });
@@ -191,6 +217,22 @@ function Gallery() {
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
   const [dragId, setDragId] = useState<string | null>(null);
+  const [watermarkEnabled, setWatermarkEnabled] = useState(false); // Enable watermark for uploads
+  const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('bottom-right'); // Default watermark position
+  const [watermarkImage, setWatermarkImage] = useState<string | null>(null); // Watermark image (base64)
+  const [watermarkImageName, setWatermarkImageName] = useState<string>(''); // Watermark image name
+  const [uploadModal, setUploadModal] = useState(false); // Upload modal state
+  const watermarkInputRef = useRef<HTMLInputElement>(null);
+  const [savedWatermarks, setSavedWatermarks] = useState<WatermarkPreset[]>(() => {
+    // Load saved watermarks from localStorage on init
+    try {
+      const saved = localStorage.getItem('watermarkPresets');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load watermark presets:', error);
+      return [];
+    }
+  });
 
   const shootTypes = [
     'Wedding',
@@ -636,22 +678,11 @@ function Gallery() {
 
   // (Optional) Updated handleShareSingle if you want files to use /shared-images format
   const handleShareSingle = async (item: GalleryItem) => {
-    setShareLoading(true);
-    addNotification('Generating share link...', 'info');
-    try {
-      const baseUrl = window.location.origin || 'http://localhost:5173';
-      const path = item.key || item.id;
-      const encodedPath = encodeURIComponent(path);
-      const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
-      setShareModal({ isOpen: true, links: [shareLink], serverMessage: null });
-    } catch (err: any) {
-      console.error('Share single failed:', err);
-      addNotification(`Share failed: ${err.message}`, 'error');
-      setShareModal({ isOpen: true, links: [], serverMessage: err.message });
-    } finally {
-      setShareLoading(false);
-    }
+    // Select the item and open share modal
+    setSelectedItems([item.id]);
+    setShareModal({ isOpen: true, links: [], serverMessage: null });
   };
+
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -673,6 +704,46 @@ function Gallery() {
     }
   };
 
+  // Revoke/delete a share link
+  const revokeShareLink = (linkId: string) => {
+    localStorage.removeItem(`share_${linkId}`);
+    setActiveShareLinks(prev => prev.filter(link => link.id !== linkId));
+    addNotification('Share link revoked successfully', 'success');
+  };
+
+  // Load active share links from localStorage on mount
+  useEffect(() => {
+    const loadActiveLinks = () => {
+      const links: typeof activeShareLinks = [];
+      
+      // Scan localStorage for share links
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('share_')) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key) || '{}');
+            if (data.id && data.link) {
+              links.push({
+                id: data.id,
+                link: data.link,
+                createdAt: data.createdAt,
+                hasPin: data.hasPin || false,
+                isActive: data.isActive !== false, // Default to true
+                items: data.items || [],
+              });
+            }
+          } catch (error) {
+            console.error('Failed to parse share link:', error);
+          }
+        }
+      }
+      
+      setActiveShareLinks(links);
+    };
+    
+    loadActiveLinks();
+  }, []);
+
 // Inside Gallery component
 
 const handleShare = async () => {
@@ -691,7 +762,36 @@ const handleShare = async () => {
       return;
     }
 
-    setShareModal({ isOpen: true, links, serverMessage: null });
+    // Create share link tracking
+    const linkId = Math.random().toString(36).substr(2, 9);
+    const now = Date.now();
+    const newShareLink = {
+      id: linkId,
+      link: links[0], // Use first link as primary
+      createdAt: now,
+      hasPin: !!sharePin,
+      isActive: true,
+      items: selectedItems,
+    };
+    
+    // Store in localStorage with PIN if provided
+    if (sharePin) {
+      const shareData = {
+        ...newShareLink,
+        pin: sharePin,
+      };
+      localStorage.setItem(`share_${linkId}`, JSON.stringify(shareData));
+    } else {
+      localStorage.setItem(`share_${linkId}`, JSON.stringify(newShareLink));
+    }
+    
+    setActiveShareLinks(prev => [...prev, newShareLink]);
+    setShareModal({ 
+      isOpen: true, 
+      links, 
+      serverMessage: null,
+      sharePin: sharePin
+    });
   } catch (err: any) {
     console.error('Share error:', err);
     let message = err.message || 'Share failed';
@@ -1238,6 +1338,100 @@ const handleShare = async () => {
     'cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef', 'srw', 'x3f', 'raf', '3fr', 'fff', 'dcr', 'kdc', 'srf', 'mrw'
   ];
 
+  // -------------------- Watermark Image Handler --------------------
+  const handleWatermarkImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      addNotification('Please select a valid image file', 'error');
+      return;
+    }
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      setWatermarkImage(base64);
+      setWatermarkImageName(file.name);
+      addNotification('Watermark image loaded', 'success');
+    };
+    reader.onerror = () => {
+      addNotification('Failed to load watermark image', 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // -------------------- Watermark Preset Management --------------------
+  const saveWatermarkPreset = () => {
+    if (!watermarkImage) {
+      addNotification('Please select a watermark image', 'error');
+      return;
+    }
+
+    const newPreset: WatermarkPreset = {
+      id: Math.random().toString(36).substr(2, 9),
+      imageUrl: watermarkImage,
+      imageName: watermarkImageName,
+      position: watermarkPosition,
+      lastUsed: Date.now(),
+    };
+
+    // Check if this exact watermark already exists
+    const exists = savedWatermarks.find(
+      (preset) => preset.imageName === watermarkImageName && preset.position === watermarkPosition
+    );
+
+    if (exists) {
+      // Update last used time
+      const updated = savedWatermarks.map((preset) =>
+        preset.id === exists.id ? { ...preset, lastUsed: Date.now() } : preset
+      );
+      setSavedWatermarks(updated);
+      localStorage.setItem('watermarkPresets', JSON.stringify(updated));
+      addNotification('Watermark preset updated', 'success');
+    } else {
+      // Add new preset (keep max 10 presets)
+      const updated = [newPreset, ...savedWatermarks].slice(0, 10);
+      setSavedWatermarks(updated);
+      localStorage.setItem('watermarkPresets', JSON.stringify(updated));
+      addNotification('Watermark preset saved', 'success');
+    }
+  };
+
+  const loadWatermarkPreset = (preset: WatermarkPreset) => {
+    setWatermarkImage(preset.imageUrl);
+    setWatermarkImageName(preset.imageName);
+    setWatermarkPosition(preset.position);
+    setWatermarkEnabled(true);
+
+    // Update last used time
+    const updated = savedWatermarks.map((p) =>
+      p.id === preset.id ? { ...p, lastUsed: Date.now() } : p
+    );
+    setSavedWatermarks(updated);
+    localStorage.setItem('watermarkPresets', JSON.stringify(updated));
+    addNotification('Watermark preset loaded', 'success');
+  };
+
+  const deleteWatermarkPreset = (presetId: string) => {
+    const updated = savedWatermarks.filter((preset) => preset.id !== presetId);
+    setSavedWatermarks(updated);
+    localStorage.setItem('watermarkPresets', JSON.stringify(updated));
+    addNotification('Watermark preset deleted', 'success');
+  };
+
+  const getPositionLabel = (position: WatermarkPosition): string => {
+    switch (position) {
+      case 'top-left': return 'Top Left';
+      case 'top-right': return 'Top Right';
+      case 'bottom-left': return 'Bottom Left';
+      case 'bottom-right': return 'Bottom Right';
+      default: return 'None';
+    }
+  };
+
   const isValidFileType = (file: File): boolean => {
     const fileName = file.name.toLowerCase();
     const fileExtension = fileName.split('.').pop() || '';
@@ -1258,7 +1452,124 @@ const handleShare = async () => {
     return isValidMimeType && isValidExtension;
   };
 
-  function handleFileSelect(selectedFiles: FileList | null) {
+  // -------------------- Watermark Application --------------------
+  const applyWatermark = async (file: File, position: WatermarkPosition, watermarkImageUrl: string): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      // Skip watermark for videos
+      if (file.type.startsWith('video/')) {
+        resolve(file);
+        return;
+      }
+
+      // Skip if position is 'none' or no watermark image
+      if (position === 'none' || !watermarkImageUrl) {
+        resolve(file);
+        return;
+      }
+
+      const img = document.createElement('img');
+      const watermarkImg = document.createElement('img');
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        img.onload = () => {
+          // Load watermark image
+          watermarkImg.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              
+              if (!ctx) {
+                reject(new Error('Could not get canvas context'));
+                return;
+              }
+
+              // Set canvas dimensions to match image
+              canvas.width = img.width;
+              canvas.height = img.height;
+
+              // Draw the original image
+              ctx.drawImage(img, 0, 0);
+
+              // Calculate watermark size (10% of image width, maintaining aspect ratio)
+              const watermarkMaxWidth = img.width * 0.15;
+              const watermarkScale = watermarkMaxWidth / watermarkImg.width;
+              const watermarkWidth = watermarkImg.width * watermarkScale;
+              const watermarkHeight = watermarkImg.height * watermarkScale;
+              const padding = img.width * 0.02; // 2% padding
+
+              // Calculate position based on selection
+              let x = 0;
+              let y = 0;
+
+              switch (position) {
+                case 'top-left':
+                  x = padding;
+                  y = padding;
+                  break;
+                case 'top-right':
+                  x = canvas.width - watermarkWidth - padding;
+                  y = padding;
+                  break;
+                case 'bottom-left':
+                  x = padding;
+                  y = canvas.height - watermarkHeight - padding;
+                  break;
+                case 'bottom-right':
+                  x = canvas.width - watermarkWidth - padding;
+                  y = canvas.height - watermarkHeight - padding;
+                  break;
+              }
+
+              // Draw watermark image with some transparency
+              ctx.globalAlpha = 0.7;
+              ctx.drawImage(watermarkImg, x, y, watermarkWidth, watermarkHeight);
+              ctx.globalAlpha = 1.0;
+
+              // Convert canvas to blob
+              canvas.toBlob((blob) => {
+                if (!blob) {
+                  reject(new Error('Failed to create watermarked image'));
+                  return;
+                }
+
+                // Create new file with watermark
+                const watermarkedFile = new File([blob], file.name, {
+                  type: file.type,
+                  lastModified: Date.now(),
+                });
+
+                resolve(watermarkedFile);
+              }, file.type, 0.95); // High quality
+            } catch (error) {
+              reject(error);
+            }
+          };
+
+          watermarkImg.onerror = () => {
+            reject(new Error('Failed to load watermark image'));
+          };
+
+          // Load watermark image
+          watermarkImg.src = watermarkImageUrl;
+        };
+
+        img.onerror = () => {
+          reject(new Error('Failed to load image'));
+        };
+
+        img.src = e.target?.result as string;
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  };
+
+  async function handleFileSelect(selectedFiles: FileList | null) {
     if (!selectedFiles) return;
 
     const allFiles = Array.from(selectedFiles);
@@ -1288,7 +1599,25 @@ const handleShare = async () => {
       return;
     }
 
-    const newFiles: UploadFile[] = validFiles.map((file) => ({
+    // Apply watermark if enabled
+    const processedFiles: File[] = [];
+    if (watermarkEnabled && watermarkPosition !== 'none' && watermarkImage) {
+      addNotification('Applying watermarks...', 'info');
+      for (const file of validFiles) {
+        try {
+          const processedFile = await applyWatermark(file, watermarkPosition, watermarkImage);
+          processedFiles.push(processedFile);
+        } catch (error: any) {
+          console.error('Watermark failed for', file.name, error);
+          addNotification(`Watermark failed for ${file.name}: ${error.message}`, 'error');
+          processedFiles.push(file); // Use original file if watermark fails
+        }
+      }
+    } else {
+      processedFiles.push(...validFiles);
+    }
+
+    const newFiles: UploadFile[] = processedFiles.map((file, index) => ({
       file,
       id: Math.random().toString(36).substr(2, 9),
       progress: 0,
@@ -1297,19 +1626,22 @@ const handleShare = async () => {
       lastLoaded: 0,
       lastTime: Date.now(),
       speed: 0,
+      watermarkPosition: watermarkEnabled ? watermarkPosition : 'none',
+      processedFile: file,
     }));
 
     // Show success message for accepted files
-    if (validFiles.length > 0) {
-      const acceptedMessage = validFiles.length === 1 
-        ? `1 file ready for upload`
-        : `${validFiles.length} files ready for upload`;
+    if (processedFiles.length > 0) {
+      const acceptedMessage = processedFiles.length === 1 
+        ? `1 file ready for upload${watermarkEnabled ? ' (with watermark)' : ''}`
+        : `${processedFiles.length} files ready for upload${watermarkEnabled ? ' (with watermarks)' : ''}`;
       addNotification(acceptedMessage, 'success');
     }
 
     setUploadFiles(newFiles);
+    setUploadModal(false); // Close the modal after files are selected
     startUpload(newFiles);
-  };
+  }
 
   // Helper to upload a single file using XMLHttpRequest for progress tracking
   const uploadFileWithXHR = (fileUpload: UploadFile, presignedUrl: PresignedUpload): Promise<void> => {
@@ -1703,7 +2035,7 @@ const handleShare = async () => {
                   {createFolderLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
                 </button>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => setUploadModal(true)}
                   className="flex items-center px-4 py-2 bg-[#FF6B00] text-white rounded-lg font-medium hover:bg-[#FF9900] transition-colors duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -2319,7 +2651,7 @@ const handleShare = async () => {
                     </button>
                     
                     <button
-                      onClick={() => handleShare()}
+                      onClick={() => setShareModal({ isOpen: true, links: [], serverMessage: null })}
                       disabled={shareLoading}
                       className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                     >
@@ -2434,17 +2766,65 @@ const handleShare = async () => {
           {/* Share Modal */}
           {shareModal.isOpen && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-[#2D2D2D]">Share Media</h3>
                   <button
-                    onClick={() => setShareModal({ isOpen: false, links: [], serverMessage: null })}
+                    onClick={() => {
+                      setShareModal({ isOpen: false, links: [], serverMessage: null });
+                      setSharePin('');
+                    }}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+                
                 <div className="space-y-4">
+                  {/* Share Settings */}
+                  {shareModal.links.length === 0 && (
+                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                      <h4 className="text-sm font-semibold text-gray-800 mb-3">Share Settings</h4>
+                      
+                      {/* PIN Protection */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          PIN Protection (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={sharePin}
+                          onChange={(e) => setSharePin(e.target.value)}
+                          placeholder="Enter 4-6 digit PIN to protect link"
+                          maxLength={6}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Leave empty for no PIN protection. Recipients will need this PIN to access.</p>
+                      </div>
+                      
+                      {/* Generate Link Button */}
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          onClick={() => handleShare()}
+                          disabled={shareLoading || selectedItems.length === 0}
+                          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {shareLoading ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <Share2 className="w-4 h-4 mr-2" />
+                              Generate Share Link {selectedItems.length > 1 && `(${selectedItems.length} items)`}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {shareModal.serverMessage && (
                     <div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
                       <strong className="text-sm text-yellow-700">Share server message:</strong>
@@ -2452,58 +2832,122 @@ const handleShare = async () => {
                     </div>
                   )}
 
-                  {shareModal.links.length === 0 && !shareModal.serverMessage && (
-                    <p className="text-gray-500">No links yet.</p>
+                  {/* Generated Links */}
+                  {shareModal.links.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-800 mb-2">Generated Link(s)</h4>
+                      {shareModal.links.map((link, idx) => (
+                        <div key={idx} className="flex items-center space-x-2 mb-2">
+                          <input
+                            type="text"
+                            value={link}
+                            readOnly
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm"
+                          />
+                          <button
+                            onClick={() => copyToClipboard(link)}
+                            className="p-2 text-[#00BCEB] hover:text-[#00A5CF]"
+                            title="Copy link"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {shareModal.sharePin && (
+                        <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm">
+                          <strong className="text-green-700">PIN:</strong> {shareModal.sharePin}
+                          <p className="text-xs text-green-600 mt-1">Share this PIN with recipients</p>
+                        </div>
+                      )}
+                    </div>
                   )}
 
-                  {shareModal.links.map((link, idx) => (
-                    <div key={idx} className="flex items-center space-x-2">
-                      <input
-                        type="text"
-                        value={link}
-                        readOnly
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-                      />
-                      <button
-                        onClick={() => copyToClipboard(link)}
-                        className="p-2 text-[#00BCEB] hover:text-[#00A5CF]"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
+                  {/* Active Share Links */}
+                  {activeShareLinks.length > 0 && (
+                    <div className="mt-6 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-semibold text-gray-800 mb-3">Active Share Links</h4>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {activeShareLinks
+                          .sort((a, b) => b.createdAt - a.createdAt)
+                          .map((shareLink) => {
+                            
+                            return (
+                              <div
+                                key={shareLink.id}
+                                className={`p-3 rounded-lg border ${
+                                  !shareLink.isActive ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center space-x-2 mb-1">
+                                      <p className="text-xs font-medium text-gray-900 truncate">
+                                        {shareLink.items.length} item(s)
+                                      </p>
+                                      {shareLink.hasPin && (
+                                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                                          🔒 PIN Protected
+                                        </span>
+                                      )}
+                                      {!shareLink.isActive && (
+                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
+                                          Revoked
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-gray-500">
+                                      Created: {new Date(shareLink.createdAt).toLocaleString()}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      Status: {shareLink.isActive ? 'Active' : 'Revoked'}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center space-x-1 ml-2">
+                                    <button
+                                      onClick={() => copyToClipboard(shareLink.link)}
+                                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                      title="Copy link"
+                                    >
+                                      <Copy className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => revokeShareLink(shareLink.id)}
+                                      className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                      title="Revoke access"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
                     </div>
-                  ))}
+                  )}
 
-                  {/* <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="email"
-                        placeholder="Enter email address"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BCEB]"
-                      />
-                      <button className="p-2 text-[#00BCEB] hover:text-[#00A5CF]">
-                        <Mail className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div> */}
-
-                  <div className="flex justify-end space-x-2">
-                    <button
-                      onClick={() => setShareModal({ isOpen: false, links: [], serverMessage: null })}
-                      className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                    >
-                      Cancel
-                    </button>
+                  <div className="flex justify-end space-x-2 pt-4">
                     <button
                       onClick={() => {
-                        // placeholder: if you have server-side share/email logic, call it here
                         setShareModal({ isOpen: false, links: [], serverMessage: null });
-                        addNotification('Link(s) prepared for sharing', 'success');
+                        setSharePin('');
                       }}
-                      className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
+                      className="px-4 py-2 text-gray-600 hover:text-gray-800"
                     >
-                      Done
+                      {shareModal.links.length > 0 ? 'Close' : 'Cancel'}
                     </button>
+                    {shareModal.links.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setShareModal({ isOpen: false, links: [], serverMessage: null });
+                          setSharePin('');
+                          addNotification('Link(s) ready for sharing', 'success');
+                        }}
+                        className="px-4 py-2 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00A5CF]"
+                      >
+                        Done
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2549,6 +2993,241 @@ const handleShare = async () => {
                   >
                     Create
                     {createFolderLoading && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Upload Modal */}
+          {uploadModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-[#2D2D2D]">Upload Files</h3>
+                  <button
+                    onClick={() => setUploadModal(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Watermark Settings in Modal */}
+                <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                  <h4 className="text-sm font-semibold text-gray-800 mb-3">Watermark Settings</h4>
+                  
+                  <div className="space-y-4">
+                    {/* Enable Watermark Toggle */}
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={watermarkEnabled}
+                        onChange={(e) => setWatermarkEnabled(e.target.checked)}
+                        className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                      />
+                      <span className="ml-3 text-sm font-medium text-gray-900">Enable Watermark on Images</span>
+                    </label>
+
+                    {watermarkEnabled && (
+                      <>
+                        {/* Watermark Image Upload */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Watermark Image</label>
+                          <div className="flex items-center space-x-3">
+                            <button
+                              onClick={() => watermarkInputRef.current?.click()}
+                              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center"
+                            >
+                              <Upload className="w-4 h-4 mr-2" />
+                              {watermarkImage ? 'Change Image' : 'Select Image'}
+                            </button>
+                            {watermarkImageName && (
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm text-gray-600 truncate max-w-xs">{watermarkImageName}</span>
+                                {watermarkImage && (
+                                  <img 
+                                    src={watermarkImage} 
+                                    alt="Watermark preview" 
+                                    className="h-10 w-10 object-contain border border-gray-300 rounded"
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <input
+                            type="file"
+                            ref={watermarkInputRef}
+                            accept="image/*"
+                            onChange={handleWatermarkImageSelect}
+                            hidden
+                          />
+                        </div>
+
+                        {/* Position Selector */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Watermark Position</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={() => setWatermarkPosition('top-left')}
+                              className={`p-4 rounded-lg border-2 transition-all duration-200 ${
+                                watermarkPosition === 'top-left'
+                                  ? 'border-purple-600 bg-purple-50'
+                                  : 'border-gray-300 bg-white hover:border-purple-300'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <div className="w-12 h-12 border-2 border-current rounded relative">
+                                  <div className="absolute top-0 left-0 w-3 h-3 bg-purple-600 rounded-full"></div>
+                                </div>
+                                <span className="text-sm font-medium">Top Left</span>
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setWatermarkPosition('top-right')}
+                              className={`p-4 rounded-lg border-2 transition-all duration-200 ${
+                                watermarkPosition === 'top-right'
+                                  ? 'border-purple-600 bg-purple-50'
+                                  : 'border-gray-300 bg-white hover:border-purple-300'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <div className="w-12 h-12 border-2 border-current rounded relative">
+                                  <div className="absolute top-0 right-0 w-3 h-3 bg-purple-600 rounded-full"></div>
+                                </div>
+                                <span className="text-sm font-medium">Top Right</span>
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setWatermarkPosition('bottom-left')}
+                              className={`p-4 rounded-lg border-2 transition-all duration-200 ${
+                                watermarkPosition === 'bottom-left'
+                                  ? 'border-purple-600 bg-purple-50'
+                                  : 'border-gray-300 bg-white hover:border-purple-300'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <div className="w-12 h-12 border-2 border-current rounded relative">
+                                  <div className="absolute bottom-0 left-0 w-3 h-3 bg-purple-600 rounded-full"></div>
+                                </div>
+                                <span className="text-sm font-medium">Bottom Left</span>
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setWatermarkPosition('bottom-right')}
+                              className={`p-4 rounded-lg border-2 transition-all duration-200 ${
+                                watermarkPosition === 'bottom-right'
+                                  ? 'border-purple-600 bg-purple-50'
+                                  : 'border-gray-300 bg-white hover:border-purple-300'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <div className="w-12 h-12 border-2 border-current rounded relative">
+                                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-purple-600 rounded-full"></div>
+                                </div>
+                                <span className="text-sm font-medium">Bottom Right</span>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-200">
+                          <span className="font-medium">Note:</span> Watermark will be applied to images only (not videos) during upload
+                        </div>
+
+                        {/* Save Watermark Button */}
+                        <div className="flex justify-end">
+                          <button
+                            onClick={saveWatermarkPreset}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center"
+                          >
+                            <Plus className="w-4 h-4 mr-1" />
+                            Save Watermark
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Saved Watermarks Section */}
+                {savedWatermarks.length > 0 && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-3">Saved Watermarks</h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {savedWatermarks
+                        .sort((a, b) => b.lastUsed - a.lastUsed)
+                        .map((preset) => (
+                          <div
+                            key={preset.id}
+                            className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200 hover:border-purple-300 transition-colors group"
+                          >
+                            <div className="flex items-center space-x-3 flex-1 min-w-0">
+                              <img 
+                                src={preset.imageUrl} 
+                                alt={preset.imageName}
+                                className="h-10 w-10 object-contain border border-gray-300 rounded"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 truncate">{preset.imageName}</p>
+                                <p className="text-xs text-gray-500">{getPositionLabel(preset.position)}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2 ml-3">
+                              <button
+                                onClick={() => loadWatermarkPreset(preset)}
+                                className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 transition-colors"
+                                title="Load this watermark"
+                              >
+                                Load
+                              </button>
+                              <button
+                                onClick={() => deleteWatermarkPreset(preset.id)}
+                                className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Delete this watermark"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* File Selection Area */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Files</label>
+                  <div 
+                    className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-[#FF6B00] transition-colors cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="text-[#FF6B00] font-medium">Click to upload</span> or drag and drop
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Images: JPG, PNG, GIF, WebP, etc. • Videos: MP4, MOV, AVI, etc.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => setUploadModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      fileInputRef.current?.click();
+                    }}
+                    className="px-6 py-2 bg-[#FF6B00] text-white rounded-lg hover:bg-[#FF9900] font-medium flex items-center shadow-lg hover:shadow-xl transition-all"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Choose Files
                   </button>
                 </div>
               </div>
