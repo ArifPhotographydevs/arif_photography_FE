@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Grid3X3,
@@ -14,6 +14,7 @@ import {
   Play,
   ChevronLeft,
   ChevronRight,
+  Lock,
 } from 'lucide-react';
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
@@ -46,6 +47,8 @@ interface ApiResponse {
 function SharedImages() {
   const { folderPath } = useParams<{ folderPath: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const shareId = searchParams.get('sid');
   
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -59,9 +62,67 @@ function SharedImages() {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+  
+  // PIN Protection
+  const [isPinRequired, setIsPinRequired] = useState(false);
+  const [isPinVerified, setIsPinVerified] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isLinkActive, setIsLinkActive] = useState(true);
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
+
+  // Check PIN protection on mount
+  useEffect(() => {
+    if (shareId) {
+      const shareData = localStorage.getItem(`share_${shareId}`);
+      if (shareData) {
+        try {
+          const data = JSON.parse(shareData);
+          
+          // Check if link is active
+          if (data.isActive === false) {
+            setIsLinkActive(false);
+            setError('This share link has been revoked by the owner.');
+            setLoading(false);
+            return;
+          }
+          
+          // Check if PIN is required
+          if (data.pin) {
+            setIsPinRequired(true);
+            setLoading(false);
+          }
+        } catch (err) {
+          console.error('Failed to parse share data:', err);
+        }
+      }
+    }
+  }, [shareId]);
+
+  // Verify PIN
+  const handlePinSubmit = () => {
+    if (!shareId) return;
+    
+    const shareData = localStorage.getItem(`share_${shareId}`);
+    if (shareData) {
+      try {
+        const data = JSON.parse(shareData);
+        if (data.pin === pinInput) {
+          setIsPinVerified(true);
+          setIsPinRequired(false);
+          setPinError('');
+          addNotification('Access granted', 'success');
+        } else {
+          setPinError('Incorrect PIN. Please try again.');
+          setPinInput('');
+        }
+      } catch (err) {
+        setPinError('Failed to verify PIN');
+      }
+    }
+  };
 
   useEffect(() => {
     const pathSegments = decodedFolderPath.replace(/^\/+/, '').split('/');
@@ -405,6 +466,53 @@ function SharedImages() {
   const totalPages = Math.ceil(items.length / itemsPerPage);
 
   const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+
+  // PIN Protection Modal
+  if (isPinRequired) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+              <Lock className="h-8 w-8 text-blue-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Protected Content</h2>
+            <p className="text-gray-600">This gallery is PIN protected. Please enter the PIN to continue.</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Enter PIN</label>
+              <input
+                type="text"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handlePinSubmit()}
+                placeholder="Enter 4-6 digit PIN"
+                maxLength={6}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
+                autoFocus
+              />
+              {pinError && (
+                <p className="mt-2 text-sm text-red-600 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {pinError}
+                </p>
+              )}
+            </div>
+            
+            <button
+              onClick={handlePinSubmit}
+              disabled={!pinInput}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Access Gallery
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
