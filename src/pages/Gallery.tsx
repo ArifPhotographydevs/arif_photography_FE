@@ -3,26 +3,6 @@
   const handleDragOverItem = (e: React.DragEvent) => {
     e.preventDefault();
   };
-
-  // -------------------- Reorder helpers (Move to first/last) --------------------
-  const moveItemInView = (id: string, newIndex: number) => {
-    setSortBy('custom');
-    setItems((prev) => {
-      const idsInView = filteredImages.map((i) => i.id);
-      const from = idsInView.indexOf(id);
-      if (from === -1) return prev;
-      const clampedIndex = Math.max(0, Math.min(newIndex, idsInView.length - 1));
-      const orderIds = [...idsInView];
-      const [moved] = orderIds.splice(from, 1);
-      orderIds.splice(clampedIndex, 0, moved);
-      const orderMap = new Map<string, number>();
-      orderIds.forEach((oid, i) => orderMap.set(oid, i));
-      return prev.map((it) => (orderMap.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
-    });
-  };
-
-  const moveItemToFirst = (id: string) => moveItemInView(id, 0);
-  const moveItemToLast = (id: string) => moveItemInView(id, filteredImages.length - 1);
   const handleDropOnItem = (targetId: string) => {
     if (!dragId || dragId === targetId) return;
     setSortBy('custom');
@@ -55,6 +35,7 @@ import {
   Trash2,
   Image,
   Calendar,
+  Camera,
   Download,
   Share2,
   Loader2,
@@ -72,7 +53,6 @@ import {
   ChevronLeft,
   Home,
   X,
-  MoreVertical,
   Copy,
   Mail,
   FolderPlus,
@@ -187,7 +167,6 @@ function Gallery() {
   const [showFilters, setShowFilters] = useState(false);
   const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; currentImage: GalleryItem | null; }>({ isOpen: false, currentImage: null });
-  const [previewDetailsOpen, setPreviewDetailsOpen] = useState(false);
   const [shareModal, setShareModal] = useState<{ isOpen: boolean; links: string[]; serverMessage?: string | null }>({ isOpen: false, links: [], serverMessage: null });
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -212,7 +191,6 @@ function Gallery() {
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
   const [dragId, setDragId] = useState<string | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null); // context menu for image card
 
   const shootTypes = [
     'Wedding',
@@ -819,7 +797,6 @@ const handleShare = async () => {
     if (videoElement) {
       videoElement.pause();
     }
-    setPreviewDetailsOpen(false);
     setPreviewModal({ isOpen: false, currentImage: null });
   };
 
@@ -2067,63 +2044,20 @@ const handleShare = async () => {
                 </div>
               )}
               {loading ? (
-                <div className="w-full py-16 flex flex-col items-center justify-center select-none">
-                  <div className="relative">
-                    <svg width="200" height="140" viewBox="0 0 200 140">
-                      <defs>
-                        <linearGradient id="camGrad" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stop-color="#0ea5e9"/>
-                          <stop offset="100%" stop-color="#8b5cf6"/>
-                        </linearGradient>
-                      </defs>
-                      {/* Camera card */}
-                      <rect x="35" y="28" rx="16" ry="16" width="130" height="76" fill="#0b1220"/>
-                      <rect x="35" y="28" rx="16" ry="16" width="130" height="76" fill="url(#camGrad)" opacity="0.12"/>
-                      {/* Strap notch */}
-                      <rect x="55" y="20" rx="4" ry="4" width="32" height="12" fill="#0b1220"/>
-                      {/* Aperture spinner */}
-                      <g transform="translate(130,66)">
-                        <circle cx="0" cy="0" r="24" fill="#0f172a" stroke="#334155" stroke-width="2"/>
-                        <g className="aperture-rotate">
-                          <path d="M0,-20 L7,-6 L-7,-6 Z" fill="#94a3b8" opacity="0.9"/>
-                          <path d="M17,-10 L4,-4 L11,10 Z" fill="#94a3b8" opacity="0.9"/>
-                          <path d="M17,10 L4,4 L-11,10 Z" fill="#94a3b8" opacity="0.9"/>
-                          <path d="M0,20 L-7,6 L7,6 Z" fill="#94a3b8" opacity="0.9"/>
-                          <path d="M-17,10 L-4,4 L-11,-10 Z" fill="#94a3b8" opacity="0.9"/>
-                          <path d="M-17,-10 L-4,-4 L11,-10 Z" fill="#94a3b8" opacity="0.9"/>
-                        </g>
-                        <circle cx="0" cy="0" r="6" fill="#1f2937" className="lens-core-min"/>
-                      </g>
-                      {/* Focus brackets */}
-                      <g className="focus-brackets" stroke="#e5e7eb" stroke-width="3" stroke-linecap="round">
-                        <path d="M60,46 h16"/>
-                        <path d="M60,46 v16"/>
-                        <path d="M144,46 h-16"/>
-                        <path d="M160,62 v-16"/>
-                        <path d="M60,100 v-16"/>
-                        <path d="M60,100 h16"/>
-                        <path d="M160,84 h-16"/>
-                        <path d="M160,100 v-16"/>
-                      </g>
-                      {/* Bokeh dots */}
-                      <g className="bokeh">
-                        <circle cx="48" cy="40" r="2" fill="#fff" opacity="0.25"/>
-                        <circle cx="52" cy="90" r="3" fill="#fff" opacity="0.18"/>
-                        <circle cx="160" cy="38" r="2" fill="#fff" opacity="0.2"/>
-                      </g>
-                    </svg>
-                  </div>
-                  <p className="mt-4 text-gray-600 font-medium">Loading gallery…</p>
-                  <style>{`
-                    @keyframes aperture { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }
-                    .aperture-rotate { transform-origin: 0 0; animation: aperture 1.2s linear infinite; }
-                    @keyframes lensCore { 0%,100% { r: 6px } 50% { r: 8px } }
-                    .lens-core-min { animation: lensCore 1.8s ease-in-out infinite; }
-                    @keyframes focusBlink { 0%,100% { opacity: .25 } 50% { opacity: 1 } }
-                    .focus-brackets { animation: focusBlink 1.6s ease-in-out infinite; }
-                    @keyframes bokehDrift { 0%{ transform: translateY(0) } 50%{ transform: translateY(-3px) } 100%{ transform: translateY(0) } }
-                    .bokeh { animation: bokehDrift 3s ease-in-out infinite; }
-                  `}</style>
+                <div className={compactView ?
+                  "columns-2 md:columns-3 gap-3" :
+                  "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"}>
+                  {/* Skeleton Loading Animation */}
+                  {Array.from({ length: 12 }).map((_, index) => (
+                    <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-pulse">
+                      <div className="w-full h-48 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer"></div>
+                      <div className="p-4 space-y-3">
+                        <div className="h-4 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded"></div>
+                        <div className="h-3 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded w-3/4"></div>
+                        <div className="h-3 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%] animate-shimmer rounded w-1/2"></div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <>
@@ -2150,7 +2084,7 @@ const handleShare = async () => {
                     </div>
                   ) : (
                     <div
-                      className={`$
+                      className={`${
                         viewMode === 'grid'
                           ? compactView
                             ? 'columns-2 md:columns-3 gap-3'
@@ -2162,9 +2096,19 @@ const handleShare = async () => {
                       {!compactView && folders.map((folder) => (
                         <div
                           key={folder.path}
-                          className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${compactView ? '' : ''}`}
+                          className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${
+                            selectedItems.includes(folder.path) 
+                              ? 'ring-2 ring-blue-500 ring-offset-2' 
+                              : ''
+                          } ${compactView ? '' : ''}`}
                         >
                           <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full -translate-y-10 translate-x-10 opacity-50"></div>
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.includes(folder.path)}
+                            onChange={(e) => handleSelectItem(folder.path, e.target.checked)}
+                            className="absolute top-3 right-3 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
+                          />
                           <div
                             onClick={() => handleFolderClick(folder.path)}
                             className="cursor-pointer flex items-center space-x-4"
@@ -2215,15 +2159,19 @@ const handleShare = async () => {
                                   ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
                                   : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
-                          draggable={viewMode === 'grid'}
+                          draggable={compactView && viewMode === 'grid'}
                           onDragStart={() => handleDragStartItem(item.id)}
                           onDragOver={handleDragOverItem}
                           onDrop={() => handleDropOnItem(item.id)}
-                          onDragEnd={() => setDragId(null)}
                         >
+                          <input
+                            type="checkbox"
+                            checked={selectedItems.includes(item.id)}
+                            onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+                            className="absolute top-2 right-2 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
+                          />
                           <div
-                            onClick={() => handleSelectItem(item.id, !selectedItems.includes(item.id))}
-                            onDoubleClick={() => handleImageClick(item)}
+                            onClick={() => handleImageClick(item)}
                             className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
                           >
                             {item.isVideo ? (
@@ -2300,7 +2248,7 @@ const handleShare = async () => {
                                 <p className="text-sm text-gray-500">{item.shootType}</p>
                                 <p className="text-sm text-gray-500">{item.eventDate}</p>
                               </div>
-                              <div className="flex items-center space-x-2 relative">
+                              <div className="flex items-center space-x-2">
                                 <button
                                   onClick={() => handleToggleFavorite(item)}
                                   className={`p-1.5 ${item.isFavorite ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'} transition-colors duration-200`}
@@ -2334,29 +2282,6 @@ const handleShare = async () => {
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
-                                )}
-                                <button
-                                  onClick={() => setOpenMenuId(openMenuId === item.id ? null : item.id)}
-                                  className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors duration-200"
-                                  title="More"
-                                >
-                                  <MoreVertical className="w-4 h-4" />
-                                </button>
-                                {openMenuId === item.id && (
-                                  <div className="absolute right-0 top-8 z-20 bg-white border border-gray-200 rounded-md shadow-lg w-40">
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => { setOpenMenuId(null); moveItemToFirst(item.id); }}
-                                    >
-                                      Move to first
-                                    </button>
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => { setOpenMenuId(null); moveItemToLast(item.id); }}
-                                    >
-                                      Move to last
-                                    </button>
-                                  </div>
                                 )}
                               </div>
                             </div>
@@ -2425,12 +2350,12 @@ const handleShare = async () => {
 
           {/* Preview Modal */}
           {previewModal.isOpen && previewModal.currentImage && (
-            <div
-              className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
               onClick={handleClosePreview}
             >
-              <div
-                className="relative max-w-6xl w-full"
+              <div 
+                className="relative max-w-4xl w-full"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Navigation Arrows */}
@@ -2453,37 +2378,20 @@ const handleShare = async () => {
                   </>
                 )}
                 
-                {/* Overlay header over media */}
-                <div className="absolute top-2 left-2 right-2 z-20 flex items-center justify-between pointer-events-none">
-                  <div className="px-2 py-1 rounded bg-black/50 text-white text-sm pointer-events-auto max-w-[70%] truncate">
-                    {previewModal.currentImage.title || previewModal.currentImage.filename}
-                  </div>
-                  <div className="flex items-center gap-2 pointer-events-auto">
-                    <button
-                      onClick={() => setPreviewDetailsOpen((v) => !v)}
-                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition"
-                      title="Details"
-                    >
-                      <MoreVertical className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={handleClosePreview}
-                      className="p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition"
-                      title="Close (Esc)"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Media */}
+                <button
+                  onClick={handleClosePreview}
+                  className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 hover:bg-opacity-70 text-white rounded-full p-2 transition-all duration-200"
+                  title="Close (Esc)"
+                >
+                  <X className="w-6 h-6" />
+                </button>
                 {previewModal.currentImage.isVideo ? (
                   <video
                     src={previewModal.currentImage.imageUrl}
                     controls
                     autoPlay
                     muted
-                    className="w-full max-h-[85vh] object-contain rounded-lg preview-modal-video"
+                    className="w-full max-h-[80vh] object-contain rounded-lg preview-modal-video"
                     onError={handleImageError}
                     preload="metadata"
                   >
@@ -2494,62 +2402,31 @@ const handleShare = async () => {
                   <img
                     src={previewModal.currentImage.imageUrl}
                     alt={previewModal.currentImage.title}
-                    className="w-full max-h-[85vh] object-contain rounded-lg"
+                    className="w-full max-h-[80vh] object-contain rounded-lg"
                     onError={handleImageError}
                   />
                 )}
-
-                {/* Details Drawer */}
-                {previewDetailsOpen && (
-                  <div className="absolute top-0 right-0 h-full w-80 bg-white shadow-2xl rounded-l-lg z-30 overflow-y-auto">
-                    <div className="p-4 border-b flex items-center justify-between">
-                      <h3 className="text-base font-semibold text-[#2D2D2D]">Image details</h3>
-                      <button
-                        onClick={() => setPreviewDetailsOpen(false)}
-                        className="px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200"
-                        title="Close details"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                    <div className="p-4 space-y-3 text-sm text-gray-700">
-                      <div>
-                        <div className="text-gray-500">Title</div>
-                        <div className="font-medium break-words">{previewModal.currentImage.title || '-'}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500">Filename</div>
-                        <div className="font-medium break-words">{previewModal.currentImage.filename}</div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="text-gray-500">Shoot type</div>
-                          <div className="font-medium">{previewModal.currentImage.shootType || '-'}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-500">Event date</div>
-                          <div className="font-medium">{previewModal.currentImage.eventDate || '-'}</div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <button
-                          onClick={() => handleDownloadItem(previewModal.currentImage!)}
-                          className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg text-sm"
-                        >
-                          <Download className="w-4 h-4 inline mr-1" />
-                          Download
-                        </button>
-                        <button
-                          onClick={() => handleShareSingle(previewModal.currentImage!)}
-                          className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
-                        >
-                          <Share2 className="w-4 h-4 inline mr-1" />
-                          Share
-                        </button>
-                      </div>
-                    </div>
+                <div className="bg-white p-4 rounded-b-lg">
+                  <p className="font-medium text-[#2D2D2D]">{previewModal.currentImage.title}</p>
+                  <p className="text-sm text-gray-500">{previewModal.currentImage.shootType}</p>
+                  <p className="text-sm text-gray-500">{previewModal.currentImage.eventDate}</p>
+                  <div className="mt-3 flex space-x-2">
+                    <button
+                      onClick={() => handleDownloadItem(previewModal.currentImage!)}
+                      className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg text-sm"
+                    >
+                      <Download className="w-4 h-4 inline mr-1" />
+                      Download
+                    </button>
+                    <button
+                      onClick={() => handleShareSingle(previewModal.currentImage!)}
+                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
+                    >
+                      <Share2 className="w-4 h-4 inline mr-1" />
+                      Share
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           )}
