@@ -19,7 +19,10 @@ import {
   Instagram,
   Facebook,
   Camera,
+<<<<<<< HEAD
   Menu,
+=======
+>>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
   Shield,
 } from 'lucide-react';
 
@@ -79,9 +82,12 @@ function SharedImages() {
     canShare: false,
     watermarkEnabled: false,
   });
+<<<<<<< HEAD
 
   // Hero Image removed with header
 
+=======
+>>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
   
   // Hero Image
   const [heroImage, setHeroImage] = useState<string | null>(null);
@@ -913,11 +919,14 @@ function SharedImages() {
                     onClick={() => handleViewImage(indexOfFirstItem + index)}
                   >
                     {item.isVideo ? (
+<<<<<<< HEAD
                       <div className="w-full h-64 bg-gray-900 flex items-center justify-center relative">
                         <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
                         {/* Use metadata-only preload for faster first paint */}
                         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                         <video className="hidden" src={getThumbUrl(item)} preload="metadata" />
+=======
+>>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
                       <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
                         <video src={item.imageUrl} className="w-full h-full object-cover" muted loop playsInline />
                         <div className="absolute inset-0 flex items-center justify-center">
@@ -1120,9 +1129,12 @@ function SharedImages() {
       )}
 
       {/* Enhanced Footer */}
+<<<<<<< HEAD
       <footer className="bg-gradient-to-t from-stone-900 to-stone-800 text-white mt-20">
         <div className="max-w-7xl mx-auto px-8 py-16">
           <div className="grid grid-cols-3 gap-8 sm:gap-12">
+=======
+>>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
       <footer className="bg-gray-900 text-white mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
