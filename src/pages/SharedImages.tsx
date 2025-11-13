@@ -2,6 +2,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  ArrowLeft,
+  Grid3X3,
+  List,
   Heart,
   Download,
   Eye,
@@ -12,6 +15,7 @@ import {
   Play,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Lock,
   Check,
   Mail,
@@ -19,13 +23,7 @@ import {
   Instagram,
   Facebook,
   Camera,
-<<<<<<< HEAD
-  Menu,
-=======
->>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
-  Shield,
 } from 'lucide-react';
-
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
 // -------------------- Interfaces --------------------
@@ -42,12 +40,10 @@ interface GalleryItem {
   key?: string;
   isVideo?: boolean;
 }
-
 interface FolderItem {
   name: string;
   path: string;
 }
-
 interface ApiResponse {
   files: any[];
   folders: FolderItem[];
@@ -59,22 +55,31 @@ function SharedImages() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const shareId = searchParams.get('sid');
-  
+
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [favoritedItems, setFavoritedItems] = useState<string[]>([]);
+  const [downloadSelectedItems, setDownloadSelectedItems] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
   const [projectName, setProjectName] = useState<string>('default');
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const itemsPerPage = 15;
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
+  // Download flow modal
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [downloadStep, setDownloadStep] = useState<1 | 3>(1);
+  const [emailInput, setEmailInput] = useState('');
+  const [downloadInlineMsg, setDownloadInlineMsg] = useState<string>('');
+  const [isModalProcessing, setIsModalProcessing] = useState(false);
+  const [modalProcessingAction, setModalProcessingAction] = useState<null | 'selected' | 'all'>(null);
   
+
   // User Permissions
   const [permissions] = useState({
     canDownload: true,
@@ -82,35 +87,14 @@ function SharedImages() {
     canShare: false,
     watermarkEnabled: false,
   });
-<<<<<<< HEAD
 
-  // Hero Image removed with header
-
-=======
->>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
-  
   // Hero Image
   const [heroImage, setHeroImage] = useState<string | null>(null);
-  
+
   // PIN Protection
   const [isPinRequired, setIsPinRequired] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
-
-  const thumbBase = (import.meta as any).env?.VITE_THUMB_BASE as string | undefined;
-  const fullBase = (import.meta as any).env?.VITE_FULL_BASE as string | undefined;
-  const getThumbUrl = (item: GalleryItem) => {
-    if (thumbBase && item.key) {
-      try { return `${thumbBase}/${encodeURIComponent(item.key)}`; } catch { return item.imageUrl; }
-    }
-    return item.imageUrl;
-  };
-  const getFullUrl = (item: GalleryItem) => {
-    if (fullBase && item.key) {
-      try { return `${fullBase}/${encodeURIComponent(item.key)}`; } catch { return item.imageUrl; }
-    }
-    return item.imageUrl;
-  };
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
@@ -122,14 +106,14 @@ function SharedImages() {
       if (shareData) {
         try {
           const data = JSON.parse(shareData);
-          
+
           // Check if link is active
           if (data.isActive === false) {
             setError('This share link has been revoked by the owner.');
             setLoading(false);
             return;
           }
-          
+
           // Check if PIN is required
           if (data.pin) {
             setIsPinRequired(true);
@@ -145,7 +129,7 @@ function SharedImages() {
   // Verify PIN
   const handlePinSubmit = () => {
     if (!shareId) return;
-    
+
     const shareData = localStorage.getItem(`share_${shareId}`);
     if (shareData) {
       try {
@@ -172,7 +156,7 @@ function SharedImages() {
     const pathSegments = decodedFolderPath.replace(/^\/+/, '').split('/');
     const galleryIndex = pathSegments.indexOf('gallery');
     let name = '';
-    
+
     if (galleryIndex !== -1 && galleryIndex + 1 < pathSegments.length) {
       name = pathSegments[galleryIndex + 1];
     } else {
@@ -180,17 +164,17 @@ function SharedImages() {
       const cleanPath = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
       name = cleanPath.split('/').pop() || cleanPath || 'default';
     }
-    
+
     // Clean up the name: replace underscores and hyphens with spaces, handle multiple spaces
     name = name.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-    
+
     setProjectName(name || 'Gallery');
   }, [decodedFolderPath]);
 
   const fetchFolderItems = useCallback(async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       let prefix = decodedFolderPath;
       if (prefix && !prefix.endsWith('/')) {
@@ -199,7 +183,6 @@ function SharedImages() {
       if (prefix.startsWith('/')) {
         prefix = prefix.slice(1);
       }
-
       const foldersResponse = await fetch(
         `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}`,
         {
@@ -208,18 +191,15 @@ function SharedImages() {
           mode: 'cors',
         }
       );
-
       if (!foldersResponse.ok) {
         throw new Error(`Failed to fetch folders: ${foldersResponse.statusText}`);
       }
-
       const foldersData: ApiResponse = await foldersResponse.json();
       const mappedFolders: FolderItem[] = foldersData.folders ? foldersData.folders.map((folder: any) => ({
         name: folder.name,
         path: folder.path,
       })) : [];
       setFolders(mappedFolders);
-
       const imagesResponse = await fetch(
         `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
         {
@@ -228,17 +208,13 @@ function SharedImages() {
           mode: 'cors',
         }
       );
-
       if (!imagesResponse.ok) {
         throw new Error(`Failed to fetch images: ${imagesResponse.statusText}`);
       }
-
       const data: ApiResponse = await imagesResponse.json();
-
       if (!data || !Array.isArray(data.files)) {
         throw new Error('Unexpected API response format');
       }
-
       const mappedItems: GalleryItem[] = data.files
         .map((item: any) => {
           if (!item.key || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
@@ -248,17 +224,13 @@ function SharedImages() {
           const rawTitle = keyParts.pop() || 'Untitled';
           const title = rawTitle.replace(/\.[^/.]+$/, '');
           let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
-
           const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
           if (dateMatch) {
             eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
           }
-
           const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
-
           const folderPath = keyParts.join('/');
           const subfolderName = folderPath.replace(prefix, '').split('/')[0] || 'Main Folder';
-
           return {
             id: item.key,
             shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
@@ -274,9 +246,8 @@ function SharedImages() {
           } as GalleryItem;
         })
         .filter((item): item is GalleryItem => item !== null);
-
       setItems(mappedItems);
-      
+
       // Set hero image as first image if available
       if (mappedItems.length > 0 && !mappedItems[0].isVideo) {
         setHeroImage(mappedItems[0].imageUrl);
@@ -293,13 +264,45 @@ function SharedImages() {
     setCurrentPage(1);
   }, [fetchFolderItems]);
 
+  // Preload initial images and warm Cache API for same-origin only (silent, no UI state)
+  useEffect(() => {
+    if (items.length === 0) return;
+    const preloadCount = Math.min(12, items.length);
+    const toPreload = items.slice(0, preloadCount).map(i => i.imageUrl);
+
+    // Best-effort Cache API warm-up for same-origin URLs only (avoid CORS console noise)
+    (async () => {
+      try {
+        if (!('caches' in window)) return;
+        const cache = await caches.open('apfe-image-cache');
+        const sameOrigin = toPreload.filter((u) => {
+          try { return new URL(u, window.location.href).origin === window.location.origin; } catch { return false; }
+        });
+        await Promise.all(sameOrigin.map(async (url) => {
+          try { await cache.add(url); } catch {}
+        }));
+      } catch {}
+    })();
+
+    const imgs: HTMLImageElement[] = [];
+    toPreload.forEach((src) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = src;
+      imgs.push(img);
+    });
+
+    return () => {
+      imgs.forEach((im) => { im.onload = null; im.onerror = null; });
+    };
+  }, [items]);
+
   const handleItemFavorite = async (itemId: string) => {
     const isCurrentlyFavorited = favoritedItems.includes(itemId);
     const newFavoritedItems = isCurrentlyFavorited
       ? favoritedItems.filter(id => id !== itemId)
       : [...favoritedItems, itemId];
     setFavoritedItems(newFavoritedItems);
-
     if (!isCurrentlyFavorited) {
       const item = items.find(item => item.id === itemId);
       if (!item || !item.key) {
@@ -307,17 +310,14 @@ function SharedImages() {
         setFavoritedItems(favoritedItems); // Revert selection
         return;
       }
-
       try {
         const folderName = 'client%20selection';
         const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
-
         const result = await createFavoritesFolderAPI({
           folderName,
           imageKeys: [item.key],
           sourceFolder,
         });
-
         if (result.success) {
           addNotification(`Image added to "${projectName}" folder under client selection`, 'success');
         } else {
@@ -339,27 +339,22 @@ function SharedImages() {
     } else {
       const newFavoritedItems = items.map(item => item.id);
       setFavoritedItems(newFavoritedItems);
-
       const imageKeys = items
         .map(item => item.key)
         .filter((key): key is string => !!key && typeof key === 'string' && key.includes('/') && key.trim() !== '');
-
       if (imageKeys.length === 0) {
         addNotification('No valid images to favorite', 'error');
         setFavoritedItems([]);
         return;
       }
-
       try {
         const folderName = 'client%20selection';
         const sourceFolder = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
-
         const result = await createFavoritesFolderAPI({
           folderName,
           imageKeys,
           sourceFolder,
         });
-
         if (result.success) {
           addNotification(`${imageKeys.length} images added to "${projectName}" folder under client selection`, 'success');
         } else {
@@ -377,6 +372,24 @@ function SharedImages() {
     navigate(`/shared-images/${encodedPath}`);
   };
 
+  // Download-only selection (separate from favorites)
+  const handleToggleDownloadSelect = (itemId: string) => {
+    setDownloadSelectedItems(prev =>
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const handleDownloadSelectAll = () => {
+    if (downloadSelectedItems.length === items.length) {
+      setDownloadSelectedItems([]);
+      addNotification('All images unselected from download', 'info');
+    } else {
+      const allIds = items.map(i => i.id);
+      setDownloadSelectedItems(allIds);
+      addNotification('All images selected for download', 'success');
+    }
+  };
+
   const addNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now().toString();
     setNotifications(prev => [...prev, { id, message, type }]);
@@ -389,7 +402,22 @@ function SharedImages() {
     window.history.back();
   };
 
-  // Try to fetch blob and save — if CORS blocks fetch, fallback to <a> download link.
+  // Quick download from toolbar: download selected-for-download, else all
+  const handleQuickDownload = async () => {
+    const downloadAll = downloadSelectedItems.length === 0;
+    if (!permissions.canDownload) {
+      addNotification('Downloads are not permitted in this gallery', 'error');
+      return;
+    }
+    if (!downloadAll && downloadSelectedItems.length === 0) {
+      addNotification('No items selected for download', 'error');
+      return;
+    }
+    addNotification(downloadAll ? 'Starting download for all items…' : `Starting download for ${downloadSelectedItems.length} selected item(s)…`, 'info');
+    await handleDownloadSelected(downloadAll);
+  };
+
+  // Blob save only (no preview/new tab)
   const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
     try {
       const res = await fetch(url, { method: 'GET', mode: 'cors' });
@@ -403,48 +431,32 @@ function SharedImages() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
+      addNotification(`Download started for ${filename}`, 'info');
       return true;
     } catch (err: any) {
-      console.warn('Direct fetch failed (possibly CORS). Falling back to <a> download link.', err);
-      // Fallback: create temporary <a> tag to trigger download
-      try {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.target = '_blank'; // Optional: open in new tab if download doesn't trigger
-        link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        addNotification(`Download started for ${filename}`, 'info');
-        return true;
-      } catch (e) {
-        console.error('Fallback download failed', e);
-        addNotification(`Download failed: ${err.message}`, 'error');
-        return false;
-      }
+      console.error('Blob download failed', err);
+      addNotification(`Download failed: ${err.message}`, 'error');
+      return false;
     }
   };
 
-  const handleDownloadSelected = async (downloadAll: boolean = false) => {
+  const handleDownloadSelected = async (downloadAll: boolean = false): Promise<number> => {
     if (!permissions.canDownload) {
       addNotification('Downloads are not permitted in this gallery', 'error');
-      return;
+      return 0;
     }
-
     try {
-      const itemsToDownload = downloadAll ? items : (favoritedItems.length > 0 
-        ? items.filter(item => favoritedItems.includes(item.id))
-        : items);
-
+      const itemsToDownload = downloadAll
+        ? items
+        : (downloadSelectedItems.length > 0
+            ? items.filter(item => downloadSelectedItems.includes(item.id))
+            : []);
       if (itemsToDownload.length === 0) {
-        addNotification('No items to download', 'error');
-        return;
+        addNotification('No items selected for download', 'error');
+        return 0;
       }
-
       setIsDownloading(true);
       setDownloadProgress({ current: 0, total: itemsToDownload.length });
-
       let successCount = 0;
       for (let i = 0; i < itemsToDownload.length; i++) {
         const item = itemsToDownload[i];
@@ -456,9 +468,9 @@ function SharedImages() {
         // Small delay to prevent browser blocking multiple downloads
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-
       setIsDownloading(false);
       addNotification(`Downloaded ${successCount} of ${itemsToDownload.length} items`, 'success');
+      return successCount;
     } catch (err: any) {
       setIsDownloading(false);
       console.error('Download error:', err);
@@ -466,7 +478,35 @@ function SharedImages() {
         `Failed to download items: ${err.message.includes('Forbidden') ? 'Permission denied - check presigned URL or contact support' : err.message}`,
         'error'
       );
+      return 0;
     }
+  };
+
+  const openDownloadFlow = () => {
+    setIsDownloadModalOpen(true);
+    setDownloadStep(1);
+  };
+
+  const sendDownloadEmail = async (email: string, total: number, successful: number) => {
+    try {
+      const res = await fetch('https://nf4htd4och.execute-api.eu-north-1.amazonaws.com/default/mailsend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: email,
+          subject: `Your ${galleryTitle} download ${successful === total ? 'completed' : 'finished'} (${successful}/${total})`,
+          proposalId: `download-${Date.now()}`,
+          html: `<p>Hi,</p><p>Your download for <strong>${galleryTitle}</strong> has ${successful === total ? 'completed successfully' : 'finished'}.</p><p>Items downloaded: <strong>${successful}</strong> of <strong>${total}</strong>.</p><p>Date: ${new Date().toLocaleString()}</p><p>Thank you,<br/>Arif Photography</p>`
+        })
+      });
+      if (res.ok) {
+        addNotification('We will notify you by email once your download is complete', 'success');
+      } else {
+        addNotification('Email service responded with an error.', 'error');
+      }
+    } catch (e:any) {
+      addNotification(`Failed to send email notification: ${e.message}`, 'error');
+    } 
   };
 
   const handleDownloadCurrentImage = async () => {
@@ -506,7 +546,7 @@ function SharedImages() {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (!isImageModalOpen || selectedImageIndex === null) return;
-      
+
       switch (e.key) {
         case 'ArrowLeft':
           e.preventDefault();
@@ -526,7 +566,6 @@ function SharedImages() {
           break;
       }
     };
-
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isImageModalOpen, selectedImageIndex, items.length]);
@@ -537,7 +576,7 @@ function SharedImages() {
     } else {
       document.body.style.overflow = 'unset';
     }
-    
+
     return () => {
       document.body.style.overflow = 'unset';
     };
@@ -550,19 +589,23 @@ function SharedImages() {
 
   const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [items.length]);
+
   // PIN Protection Modal
   if (isPinRequired) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md border border-gray-100">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md border border-amber-100">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full mb-6">
-              <Lock className="h-10 w-10 text-slate-700" />
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-amber-100 to-amber-200 rounded-full mb-6">
+              <Lock className="h-10 w-10 text-amber-700" />
             </div>
             <h2 className="text-3xl font-light text-gray-900 mb-3 tracking-tight">Download Pin Required</h2>
             <p className="text-gray-600 text-base leading-relaxed">Images in this gallery require a PIN for download. Enter your PIN below</p>
           </div>
-          
+
           <div className="space-y-6">
             <div>
               <input
@@ -572,7 +615,7 @@ function SharedImages() {
                 onKeyPress={(e) => e.key === 'Enter' && handlePinSubmit()}
                 placeholder="Enter PIN"
                 maxLength={6}
-                className="w-full px-6 py-4 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent text-center text-2xl tracking-[0.3em] font-light text-gray-900 placeholder-gray-400 transition-all"
+                className="w-full px-6 py-4 border-2 border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-2xl tracking-[0.3em] font-light text-gray-900 placeholder-amber-400 transition-all"
                 autoFocus
               />
               {pinError && (
@@ -582,18 +625,18 @@ function SharedImages() {
                 </p>
               )}
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={() => setIsPinRequired(false)}
-                className="flex-1 py-3 px-6 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                className="flex-1 py-3 px-6 bg-amber-100 text-amber-700 rounded-xl hover:bg-amber-200 transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePinSubmit}
                 disabled={!pinInput}
-                className="flex-1 py-3 px-6 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 py-3 px-6 bg-amber-900 text-white rounded-xl hover:bg-amber-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Submit
               </button>
@@ -603,28 +646,26 @@ function SharedImages() {
       </div>
     );
   }
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-gray-400" />
-          <p className="text-gray-500 font-light">Loading...</p>
+          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-amber-600" />
+          <p className="text-amber-700 font-light">Loading...</p>
         </div>
       </div>
     );
   }
-
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
         <div className="text-center max-w-md mx-auto">
-          <AlertCircle className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+          <AlertCircle className="h-16 w-16 text-amber-400 mx-auto mb-6" />
           <h2 className="text-2xl font-light text-gray-900 mb-3">Error Loading Gallery</h2>
-          <p className="text-gray-500 mb-6">{error}</p>
+          <p className="text-amber-700 mb-6">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+            className="px-6 py-2 bg-amber-900 text-white rounded-lg hover:bg-amber-800 transition-colors"
           >
             Retry
           </button>
@@ -632,35 +673,34 @@ function SharedImages() {
       </div>
     );
   }
-
   // Extract gallery title from path
   const getGalleryTitle = () => {
     if (!decodedFolderPath) return projectName;
-    
+
     // Remove leading/trailing slashes and split
     const cleanPath = decodedFolderPath.replace(/^\/+/, '').replace(/\/+$/, '');
     const segments = cleanPath.split('/').filter(Boolean);
-    
+
     // Get the last segment
     let title = segments.length > 0 ? segments[segments.length - 1] : cleanPath;
-    
+
     // Clean up: replace underscores and hyphens with spaces, handle multiple spaces
     title = title.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-    
+
     // Capitalize first letter of each word
-    title = title.split(' ').map(word => 
+    title = title.split(' ').map(word =>
       word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     ).join(' ');
-    
+
     return title || projectName;
   };
-  
+
   const galleryTitle = getGalleryTitle();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50">
       {/* Hero Header with Image */}
-      <header className="relative w-full h-[60vh] min-h-[400px] max-h-[600px] overflow-hidden">
+      <header className="relative w-full h-screen min-h-[600px] overflow-hidden">
         {/* Hero Image Background */}
         {heroImage ? (
           <div className="absolute inset-0">
@@ -669,16 +709,16 @@ function SharedImages() {
               alt={galleryTitle}
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/80" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30" />
           </div>
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptLTQtNHYyaC0ydi0yaDJ6Ii8+PC9nPjwvZz48L3N2Zz4=')] opacity-10" />
+            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptLTQtNHYyaC0ydi0yaDJ6Ii8+PC9nPjwvZz48L3N2Zz4=")' }} />
           </div>
         )}
-        
+
         {/* Navigation Bar */}
-        <div className="relative z-10 bg-black/20 backdrop-blur-sm border-b border-white/10">
+        <div className="relative z-10 bg-black/30 backdrop-blur-md border-b border-white/10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16 sm:h-20">
               <div className="flex items-center space-x-4 sm:space-x-6 flex-1 min-w-0">
@@ -692,8 +732,8 @@ function SharedImages() {
                 </button>
                 <div className="h-6 w-px bg-white/30" />
                 <div className="flex-1 min-w-0">
-                  <h1 className="text-xl sm:text-2xl md:text-3xl font-light text-white truncate tracking-tight">
-                    {galleryTitle.toUpperCase()}
+                  <h1 className="text-xl sm:text-2xl md:text-3xl font-light text-white truncate tracking-tight uppercase">
+                    {galleryTitle}
                   </h1>
                   <p className="text-xs sm:text-sm text-white/80 mt-1 hidden sm:block font-light">
                     A curated collection of beautiful photography
@@ -704,8 +744,8 @@ function SharedImages() {
                 <button
                   onClick={() => setViewMode('grid')}
                   className={`p-2 sm:p-2.5 rounded-lg transition-all backdrop-blur-md ${
-                    viewMode === 'grid' 
-                      ? 'bg-white/20 text-white shadow-lg' 
+                    viewMode === 'grid'
+                      ? 'bg-white/20 text-white shadow-lg'
                       : 'bg-white/10 text-white/70 hover:text-white hover:bg-white/20'
                   }`}
                   aria-label="Grid view"
@@ -715,8 +755,8 @@ function SharedImages() {
                 <button
                   onClick={() => setViewMode('list')}
                   className={`p-2 sm:p-2.5 rounded-lg transition-all backdrop-blur-md ${
-                    viewMode === 'list' 
-                      ? 'bg-white/20 text-white shadow-lg' 
+                    viewMode === 'list'
+                      ? 'bg-white/20 text-white shadow-lg'
                       : 'bg-white/10 text-white/70 hover:text-white hover:bg-white/20'
                   }`}
                   aria-label="List view"
@@ -727,139 +767,63 @@ function SharedImages() {
             </div>
           </div>
         </div>
-
         {/* Hero Content */}
-        <div className="absolute bottom-0 left-0 right-0 z-10">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8 sm:pb-12">
-            <div className="flex items-end justify-between">
-              <div className="text-white">
-                <div className="flex items-center gap-3 mb-2">
-                  <Camera className="h-5 w-5 text-white/80" />
-                  <span className="text-sm font-light text-white/90">Arif Photography</span>
-                </div>
-                <p className="text-sm sm:text-base text-white/80 font-light max-w-2xl">
-                  Professional photography services capturing your special moments
-                </p>
-              </div>
-              {items.length > 0 && (
-                <div className="hidden sm:block text-right">
-                  <div className="text-3xl sm:text-4xl font-light text-white mb-1">
-                    {items.length}
-                  </div>
-                  <div className="text-sm text-white/80 font-light">
-                    {items.length === 1 ? 'Image' : 'Images'}
-                  </div>
-                </div>
-              )}
-            </div>
+        <div className="absolute inset-0 z-10 flex items-end justify-center pb-16 md:pb-24 lg:pb-28">
+          <div className="text-center px-4">
+            <div className="text-white/80 tracking-[0.25em] uppercase mb-4">Arif Photography</div>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white drop-shadow-lg">
+              {galleryTitle}
+            </h1>
+            <p className="mt-4 text-white/90 text-sm sm:text-base font-light">
+              A curated collection of beautiful photography
+            </p>
+            <a href="#gallery" className="inline-flex items-center justify-center mt-10 text-white/90 hover:text-white transition-colors" aria-label="Scroll to gallery">
+              <ChevronDown className="h-8 w-8 animate-bounce" />
+            </a>
           </div>
         </div>
       </header>
 
-      {/* Download Bar with Permissions */}
-      {items.length > 0 && (
-        <div className="bg-white/95 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-30 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center gap-4 flex-wrap">
-                {favoritedItems.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg">
-                      <Check className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-medium text-gray-700">
-                        {favoritedItems.length} image{favoritedItems.length !== 1 ? 's' : ''} selected
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setFavoritedItems([])}
-                      className="text-sm text-gray-600 hover:text-gray-900 transition-colors underline"
-                    >
-                      Clear
-                    </button>
-                  </>
-                )}
-                {isDownloading && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 px-3 py-1.5 bg-gray-50 rounded-lg">
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                    <span>Downloading {downloadProgress.current} of {downloadProgress.total}...</span>
-                  </div>
-                )}
-                {/* Permission Badge */}
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-lg">
-                  <Shield className="h-4 w-4 text-green-600" />
-                  <span className="text-xs text-green-700 font-medium">
-                    {permissions.canDownload ? 'Download Enabled' : 'View Only'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {favoritedItems.length > 0 && permissions.canDownload && (
-                  <button
-                    onClick={() => handleDownloadSelected(false)}
-                    disabled={isDownloading}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>Download Selected</span>
-                  </button>
-                )}
-                {permissions.canDownload && (
-                  <button
-                    onClick={() => handleDownloadSelected(true)}
-                    disabled={isDownloading}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>Download All</span>
-                  </button>
-                )}
-                {!permissions.canDownload && (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-500 rounded-lg text-sm font-medium cursor-not-allowed">
-                    <Lock className="h-4 w-4" />
-                    <span>Downloads Restricted</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Info Banner */}
-      <div className="bg-gray-50/50 border-b border-gray-200/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-start gap-3 text-gray-700">
-            <Heart className="h-5 w-5 text-gray-500 mt-0.5 flex-shrink-0" />
-            <p className="text-sm leading-relaxed text-gray-600">
-              Easily save your favorite pictures by clicking the <span className="font-medium">heart icon</span> to select images. They&apos;ll be saved to your &quot;{projectName}&quot; folder in client selection.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main id="gallery" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {items.length > 0 && (
           <div className="mb-8 flex items-center justify-between">
-            <button
-              onClick={handleFavoriteAll}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium text-gray-700"
-            >
-              <Heart className={`h-4 w-4 ${favoritedItems.length === items.length ? 'fill-red-500 text-red-500' : ''}`} />
-              <span>
-                {favoritedItems.length === items.length ? 'Unselect All' : 'Select All'}
-              </span>
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleFavoriteAll}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium text-gray-700"
+              >
+                <Heart className={`h-4 w-4 ${favoritedItems.length === items.length ? 'fill-red-500 text-red-500' : ''}`} />
+                <span>
+                  {favoritedItems.length === items.length ? 'Unselect All' : 'Select All'}
+                </span>
+              </button>
+              <button
+                onClick={handleDownloadSelectAll}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium text-gray-700"
+              >
+                <Download className={`h-4 w-4 ${downloadSelectedItems.length === items.length ? 'text-gray-900' : 'text-gray-500'}`} />
+                <span>
+                  {downloadSelectedItems.length === items.length ? 'Unselect All (Download)' : 'Select All for Download'}
+                </span>
+              </button>
+              <button
+                onClick={openDownloadFlow}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-sm font-medium"
+              >
+                <Download className="h-4 w-4" />
+                <span>Download</span>
+              </button>
+            </div>
             <span className="text-sm text-gray-500 font-light">
-              {items.length} {items.length === 1 ? 'image' : 'images'}
+              {items.length} {items.length === 1 ? 'image' : 'images'} • Selected for download: {downloadSelectedItems.length}
             </span>
           </div>
         )}
-
         {folders.length > 0 && (
           <div className="mb-12">
             <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Folders</h2>
-            <div className="grid grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {folders.map((folder) => (
                 <div
                   key={folder.path}
@@ -877,7 +841,6 @@ function SharedImages() {
             </div>
           </div>
         )}
-
         {items.length === 0 && folders.length === 0 ? (
           <div className="text-center py-24">
             <FolderPlus className="h-16 w-16 text-gray-300 mx-auto mb-6" />
@@ -889,8 +852,8 @@ function SharedImages() {
             {folders.length > 0 && (
               <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Images & Videos</h2>
             )}
-            <div className={viewMode === 'grid' 
-              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
+            <div className={viewMode === 'grid'
+              ? 'columns-1 sm:columns-2 lg:columns-3 gap-6'
               : 'space-y-3'
             }>
               {currentItems.map((item, index) => (
@@ -898,7 +861,8 @@ function SharedImages() {
                   key={item.id}
                   className={`group relative bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100/50 ${
                     favoritedItems.includes(item.id) ? 'ring-2 ring-red-500 ring-offset-2' : ''
-                  } ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : ''}`}
+                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : 'mb-6 break-inside-avoid'}`}
+                  style={{ contentVisibility: 'auto' }}
                 >
                   <button
                     onClick={(e) => {
@@ -906,39 +870,43 @@ function SharedImages() {
                       handleItemFavorite(item.id);
                     }}
                     className={`absolute top-3 right-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
-                      favoritedItems.includes(item.id) 
-                        ? 'bg-red-500/90 text-white shadow-lg' 
+                      favoritedItems.includes(item.id)
+                        ? 'bg-red-500/90 text-white shadow-lg'
                         : 'bg-white/90 text-gray-400 hover:text-red-500 hover:bg-white shadow-sm'
                     }`}
                     aria-label={favoritedItems.includes(item.id) ? 'Remove from favorites' : 'Add to favorites'}
                   >
                     <Heart className="h-4 w-4" fill={favoritedItems.includes(item.id) ? 'currentColor' : 'none'} />
                   </button>
-                  <div 
-                    className={`relative ${viewMode === 'list' ? 'w-32 h-20 flex-shrink-0 rounded-lg overflow-hidden' : 'aspect-[4/3]'}`}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleDownloadSelect(item.id);
+                    }}
+                    className={`absolute top-3 left-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
+                      downloadSelectedItems.includes(item.id)
+                        ? 'bg-indigo-600/90 text-white shadow-lg'
+                        : 'bg-white/90 text-gray-500 hover:text-indigo-600 hover:bg-white shadow-sm'
+                    }`}
+                    aria-label={downloadSelectedItems.includes(item.id) ? 'Unselect for download' : 'Select for download'}
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <div
+                    className={`relative ${viewMode === 'list' ? 'w-32 h-20 flex-shrink-0 rounded-lg overflow-hidden' : ''}`}
                     onClick={() => handleViewImage(indexOfFirstItem + index)}
                   >
                     {item.isVideo ? (
-<<<<<<< HEAD
-                      <div className="w-full h-64 bg-gray-900 flex items-center justify-center relative">
+                      <div className="w-full h-56 sm:h-64 bg-gray-900 flex items-center justify-center relative">
                         <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
-                        {/* Use metadata-only preload for faster first paint */}
-                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                        <video className="hidden" src={getThumbUrl(item)} preload="metadata" />
-=======
->>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
-                      <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
-                        <video src={item.imageUrl} className="w-full h-full object-cover" muted loop playsInline />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
-                        </div>
                       </div>
                     ) : (
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
                         loading="lazy"
+                        decoding="async"
                         onError={(e) => {
                           e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
                           addNotification(`Failed to load ${item.title}`, 'error');
@@ -972,8 +940,8 @@ function SharedImages() {
                     key={i}
                     onClick={() => paginate(i + 1)}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      currentPage === i + 1 
-                        ? 'bg-gray-900 text-white' 
+                      currentPage === i + 1
+                        ? 'bg-gray-900 text-white'
                         : 'bg-white border border-gray-200 hover:bg-gray-50 text-gray-700'
                     }`}
                   >
@@ -992,15 +960,14 @@ function SharedImages() {
           </div>
         ) : null}
       </main>
-
       {/* Notifications */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {notifications.map((notification) => (
           <div
             key={notification.id}
             className={`px-5 py-3 rounded-xl shadow-2xl max-w-sm flex items-center gap-3 backdrop-blur-md animate-fade-in ${
-              notification.type === 'success' 
-                ? 'bg-green-500/90 text-white' 
+              notification.type === 'success'
+                ? 'bg-green-500/90 text-white'
                 : notification.type === 'error'
                 ? 'bg-red-500/90 text-white'
                 : 'bg-gray-900/90 text-white'
@@ -1018,14 +985,139 @@ function SharedImages() {
           </div>
         ))}
       </div>
-
+      {/* Download progress bar */}
+      {isDownloading && (
+        <div className="fixed top-0 left-0 right-0 z-50">
+          <div className="h-1 bg-gray-200">
+            <div
+              className="h-1 bg-gray-900 transition-all"
+              style={{ width: `${downloadProgress.total ? (downloadProgress.current / downloadProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {/* Preloading runs silently without UI */}
+      {/* Download Flow Modal */}
+      {isDownloadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 relative">
+            <div className="flex items-center justify-center mb-4">
+              <Download className="h-8 w-8 text-gray-700" />
+            </div>
+            {downloadStep === 1 && (
+              <div>
+                <h3 className="text-xl font-medium text-gray-900 text-center">Download Photos</h3>
+                <label className="block text-xs font-semibold text-gray-700 mt-6 mb-2 uppercase tracking-wider">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e)=>setEmailInput(e.target.value)}
+                  placeholder="janedoe@gmail.com"
+                  className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-800"
+                />
+                <div className="mt-6 flex items-center justify-end gap-3">
+                  <button onClick={()=>setIsDownloadModalOpen(false)} className="px-4 py-2 rounded-lg border">Cancel</button>
+                  <button
+                    onClick={()=>setDownloadStep(3)}
+                    disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)}
+                    className="px-5 py-2 rounded-lg bg-gray-900 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >Next</button>
+                </div>
+              </div>
+            )}
+            {downloadStep === 3 && (
+              <div>
+                <div className="flex items-center justify-center mb-2">
+                  <Check className="h-8 w-8 text-gray-700" />
+                </div>
+                <h3 className="text-xl font-medium text-gray-900 text-center">Download Ready</h3>
+                <p className="text-sm text-gray-600 text-center mt-2">
+                  Your selected images are ready for download. Click the button below.
+                </p>
+                {downloadInlineMsg && (
+                  <div className="mt-3 text-center text-sm text-gray-700">
+                    {downloadInlineMsg}
+                  </div>
+                )}
+                {isModalProcessing && (
+                  <div className="mt-4">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-2 bg-gray-900 transition-all"
+                        style={{ width: `${downloadProgress.total ? Math.round((downloadProgress.current / downloadProgress.total) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-gray-600 text-center">
+                      {downloadProgress.current}/{downloadProgress.total || 0} items
+                    </div>
+                  </div>
+                )}
+                <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+                  <button onClick={()=>!isModalProcessing && setIsDownloadModalOpen(false)} disabled={isModalProcessing} className={`px-4 py-2 rounded-lg border ${isModalProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}>Close</button>
+                  <button
+                    onClick={async ()=>{
+                      const total = downloadSelectedItems.length;
+                      if (total === 0) return;
+                      setIsModalProcessing(true);
+                      setModalProcessingAction('selected');
+                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      const success = await handleDownloadSelected(false);
+                      if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
+                      setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
+                      setIsModalProcessing(false);
+                      setModalProcessingAction(null);
+                    }}
+                    disabled={downloadSelectedItems.length === 0 || isModalProcessing}
+                    className={`px-5 py-2 rounded-lg ${downloadSelectedItems.length === 0 || isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                  >
+                    {isModalProcessing && modalProcessingAction === 'selected' ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Downloading ({downloadProgress.current}/{downloadProgress.total || downloadSelectedItems.length})
+                      </span>
+                    ) : (
+                      <>Download Selected ({downloadSelectedItems.length})</>
+                    )}
+                  </button>
+                  <button
+                    onClick={async ()=>{
+                      const total = items.length;
+                      setIsModalProcessing(true);
+                      setModalProcessingAction('all');
+                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      const success = await handleDownloadSelected(true);
+                      if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
+                      setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
+                      setIsModalProcessing(false);
+                      setModalProcessingAction(null);
+                    }}
+                    disabled={isModalProcessing}
+                    className={`px-5 py-2 rounded-lg ${isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                  >
+                    {isModalProcessing && modalProcessingAction === 'all' ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Downloading ({downloadProgress.current}/{downloadProgress.total || items.length})
+                      </span>
+                    ) : (
+                      <>Download All ({items.length})</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Image Viewer Modal */}
       {isImageModalOpen && selectedImageIndex !== null && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm"
           onClick={handleCloseImageModal}
         >
-          <div 
+          <div
             className="relative w-full h-full max-w-7xl max-h-[100vh] p-4 flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1036,7 +1128,6 @@ function SharedImages() {
             >
               <X className="h-6 w-6" />
             </button>
-
             {/* Navigation Buttons */}
             {selectedImageIndex > 0 && (
               <button
@@ -1060,12 +1151,11 @@ function SharedImages() {
                 <ChevronRight className="h-8 w-8" />
               </button>
             )}
-
             {/* Image/Video */}
             <div className="flex items-center justify-center h-full w-full">
               {items[selectedImageIndex]?.isVideo ? (
                 <video
-                  src={getFullUrl(items[selectedImageIndex])}
+                  src={items[selectedImageIndex]?.imageUrl}
                   className="max-w-full max-h-[90vh] object-contain rounded-lg"
                   controls
                   autoPlay
@@ -1075,7 +1165,7 @@ function SharedImages() {
                 />
               ) : (
                 <img
-                  src={getFullUrl(items[selectedImageIndex])}
+                  src={items[selectedImageIndex]?.imageUrl}
                   alt={items[selectedImageIndex]?.title}
                   className="max-w-full max-h-[90vh] object-contain rounded-lg"
                   onClick={(e) => e.stopPropagation()}
@@ -1086,7 +1176,6 @@ function SharedImages() {
                 />
               )}
             </div>
-
             {/* Bottom Info Bar */}
             <div className="absolute bottom-6 left-0 right-0 z-20">
               <div className="mx-auto max-w-4xl bg-white/10 backdrop-blur-md rounded-2xl p-6 text-white border border-white/20">
@@ -1104,8 +1193,8 @@ function SharedImages() {
                         handleItemFavorite(items[selectedImageIndex].id);
                       }}
                       className={`p-3 rounded-full backdrop-blur-md transition-all hover:scale-110 ${
-                        favoritedItems.includes(items[selectedImageIndex].id) 
-                          ? 'bg-red-500/90 text-white' 
+                        favoritedItems.includes(items[selectedImageIndex].id)
+                          ? 'bg-red-500/90 text-white'
                           : 'bg-white/10 text-white hover:bg-white/20'
                       }`}
                     >
@@ -1127,15 +1216,8 @@ function SharedImages() {
           </div>
         </div>
       )}
-
       {/* Enhanced Footer */}
-<<<<<<< HEAD
       <footer className="bg-gradient-to-t from-stone-900 to-stone-800 text-white mt-20">
-        <div className="max-w-7xl mx-auto px-8 py-16">
-          <div className="grid grid-cols-3 gap-8 sm:gap-12">
-=======
->>>>>>> parent of 2c3c530 (Merge pull request #29 from ArifPhotographydevs/sharepage)
-      <footer className="bg-gray-900 text-white mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
             {/* Brand Section */}
@@ -1145,11 +1227,10 @@ function SharedImages() {
                 <h3 className="text-xl font-light tracking-wide">Arif Photography</h3>
               </div>
               <p className="text-sm text-gray-400 font-light leading-relaxed max-w-xs">
-                Capturing life&apos;s most precious moments with professional photography services. 
+                Capturing life&apos;s most precious moments with professional photography services.
                 Your memories, beautifully preserved.
               </p>
             </div>
-
             {/* Contact Section */}
             <div className="space-y-4">
               <h4 className="text-sm font-semibold text-white uppercase tracking-wider">Contact</h4>
@@ -1170,7 +1251,6 @@ function SharedImages() {
                 </a>
               </div>
             </div>
-
             {/* Social & Links Section */}
             <div className="space-y-4">
               <h4 className="text-sm font-semibold text-white uppercase tracking-wider">Follow Us</h4>
@@ -1196,20 +1276,19 @@ function SharedImages() {
               </div>
               <div className="pt-4 border-t border-white/10">
                 <p className="text-xs text-gray-500 font-light">
-                  {new Date().getFullYear()} Arif Photography. All rights reserved.
+                  © {new Date().getFullYear()} Arif Photography. All rights reserved.
                 </p>
               </div>
             </div>
           </div>
-
           {/* Bottom Bar */}
           <div className="mt-12 pt-8 border-t border-white/10">
-            <div className="flex flex-row items-center justify-between gap-4">
-              <p className="text-xs text-gray-500 font-light text-left">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <p className="text-xs text-gray-500 font-light text-center sm:text-left">
                 Professional Photography Services
               </p>
               <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Shield className="h-3 w-3" />
+                <Camera className="h-3 w-3" />
                 <span className="font-light">Secure Gallery Access</span>
               </div>
             </div>
@@ -1219,5 +1298,4 @@ function SharedImages() {
     </div>
   );
 }
-
 export default SharedImages;
