@@ -2,9 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft,
-  Grid3X3,
-  List,
   Heart,
   Download,
   Eye,
@@ -23,7 +20,9 @@ import {
   Instagram,
   Facebook,
   Camera,
+  Menu,
 } from 'lucide-react';
+
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
 // -------------------- Interfaces --------------------
@@ -60,7 +59,7 @@ function SharedImages() {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode] = useState<'grid' | 'list'>('grid');
   const [favoritedItems, setFavoritedItems] = useState<string[]>([]);
   const [downloadSelectedItems, setDownloadSelectedItems] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
@@ -68,7 +67,7 @@ function SharedImages() {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15;
+  const itemsPerPage = 9;
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
   // Download flow modal
@@ -88,13 +87,27 @@ function SharedImages() {
     watermarkEnabled: false,
   });
 
-  // Hero Image
-  const [heroImage, setHeroImage] = useState<string | null>(null);
+  // Hero Image removed with header
 
   // PIN Protection
   const [isPinRequired, setIsPinRequired] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+
+  const thumbBase = (import.meta as any).env?.VITE_THUMB_BASE as string | undefined;
+  const fullBase = (import.meta as any).env?.VITE_FULL_BASE as string | undefined;
+  const getThumbUrl = (item: GalleryItem) => {
+    if (thumbBase && item.key) {
+      try { return `${thumbBase}/${encodeURIComponent(item.key)}`; } catch { return item.imageUrl; }
+    }
+    return item.imageUrl;
+  };
+  const getFullUrl = (item: GalleryItem) => {
+    if (fullBase && item.key) {
+      try { return `${fullBase}/${encodeURIComponent(item.key)}`; } catch { return item.imageUrl; }
+    }
+    return item.imageUrl;
+  };
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
@@ -248,10 +261,7 @@ function SharedImages() {
         .filter((item): item is GalleryItem => item !== null);
       setItems(mappedItems);
 
-      // Set hero image as first image if available
-      if (mappedItems.length > 0 && !mappedItems[0].isVideo) {
-        setHeroImage(mappedItems[0].imageUrl);
-      }
+      // No hero image usage
     } catch (err: any) {
       setError(`Failed to load folder items: ${err.message}`);
     } finally {
@@ -267,27 +277,44 @@ function SharedImages() {
   // Preload initial images and warm Cache API for same-origin only (silent, no UI state)
   useEffect(() => {
     if (items.length === 0) return;
-    const preloadCount = Math.min(12, items.length);
+    const preloadCount = Math.min(6, items.length);
     const toPreload = items.slice(0, preloadCount).map(i => i.imageUrl);
 
     // Best-effort Cache API warm-up for same-origin URLs only (avoid CORS console noise)
-    (async () => {
-      try {
-        if (!('caches' in window)) return;
-        const cache = await caches.open('apfe-image-cache');
-        const sameOrigin = toPreload.filter((u) => {
-          try { return new URL(u, window.location.href).origin === window.location.origin; } catch { return false; }
-        });
-        await Promise.all(sameOrigin.map(async (url) => {
-          try { await cache.add(url); } catch {}
-        }));
-      } catch {}
-    })();
+    const defer = (cb: () => void) => {
+      // Defer preloading so it doesn't compete with initial viewport images
+      // Prefer requestIdleCallback when available
+      // @ts-ignore
+      if (typeof window.requestIdleCallback === 'function') {
+        // @ts-ignore
+        window.requestIdleCallback(cb, { timeout: 2000 });
+      } else {
+        setTimeout(cb, 300);
+      }
+    };
+
+    defer(() => {
+      (async () => {
+        try {
+          if (!('caches' in window)) return;
+          const cache = await caches.open('apfe-image-cache');
+          const sameOrigin = toPreload.filter((u) => {
+            try { return new URL(u, window.location.href).origin === window.location.origin; } catch { return false; }
+          });
+          await Promise.all(sameOrigin.map(async (url) => {
+            try { await cache.add(url); } catch {}
+          }));
+        } catch {}
+      })();
+    });
 
     const imgs: HTMLImageElement[] = [];
     toPreload.forEach((src) => {
       const img = new Image();
       img.decoding = 'async';
+      // Lower preloading priority
+      // @ts-ignore
+      if ('fetchPriority' in img) (img as any).fetchPriority = 'low';
       img.src = src;
       imgs.push(img);
     });
@@ -398,9 +425,7 @@ function SharedImages() {
     }, 5000);
   };
 
-  const handleBackToGallery = () => {
-    window.history.back();
-  };
+  // Removed back navigation button with header
 
   // Quick download from toolbar: download selected-for-download, else all
   const handleQuickDownload = async () => {
@@ -434,8 +459,7 @@ function SharedImages() {
       addNotification(`Download started for ${filename}`, 'info');
       return true;
     } catch (err: any) {
-      console.error('Blob download failed', err);
-      addNotification(`Download failed: ${err.message}`, 'error');
+      addNotification('Download blocked by cross-origin policy. Please enable CORS on the file host or use the app domain.', 'error');
       return false;
     }
   };
@@ -699,93 +723,46 @@ function SharedImages() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50">
-      {/* Hero Header with Image */}
-      <header className="relative w-full h-screen min-h-[600px] overflow-hidden">
-        {/* Hero Image Background */}
-        {heroImage ? (
-          <div className="absolute inset-0">
-            <img
-              src={heroImage}
-              alt={galleryTitle}
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30" />
-          </div>
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptLTQtNHYyaC0ydi0yaDJ6Ii8+PC9nPjwvZz48L3N2Zz4=")' }} />
-          </div>
-        )}
-
-        {/* Navigation Bar */}
-        <div className="relative z-10 bg-black/30 backdrop-blur-md border-b border-white/10">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16 sm:h-20">
-              <div className="flex items-center space-x-4 sm:space-x-6 flex-1 min-w-0">
-                <button
-                  onClick={handleBackToGallery}
-                  className="flex items-center space-x-2 text-white/90 hover:text-white transition-colors group"
-                  aria-label="Go back"
-                >
-                  <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
-                  <span className="text-sm font-medium hidden sm:inline">Home</span>
-                </button>
-                <div className="h-6 w-px bg-white/30" />
-                <div className="flex-1 min-w-0">
-                  <h1 className="text-xl sm:text-2xl md:text-3xl font-light text-white truncate tracking-tight uppercase">
-                    {galleryTitle}
-                  </h1>
-                  <p className="text-xs sm:text-sm text-white/80 mt-1 hidden sm:block font-light">
-                    A curated collection of beautiful photography
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 sm:p-2.5 rounded-lg transition-all backdrop-blur-md ${
-                    viewMode === 'grid'
-                      ? 'bg-white/20 text-white shadow-lg'
-                      : 'bg-white/10 text-white/70 hover:text-white hover:bg-white/20'
-                  }`}
-                  aria-label="Grid view"
-                >
-                  <Grid3X3 className="h-4 w-4 sm:h-5 sm:w-5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 sm:p-2.5 rounded-lg transition-all backdrop-blur-md ${
-                    viewMode === 'list'
-                      ? 'bg-white/20 text-white shadow-lg'
-                      : 'bg-white/10 text-white/70 hover:text-white hover:bg-white/20'
-                  }`}
-                  aria-label="List view"
-                >
-                  <List className="h-4 w-4 sm:h-5 sm:w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        {/* Hero Content */}
-        <div className="absolute inset-0 z-10 flex items-end justify-center pb-16 md:pb-24 lg:pb-28">
-          <div className="text-center px-4">
-            <div className="text-white/80 tracking-[0.25em] uppercase mb-4">Arif Photography</div>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white drop-shadow-lg">
-              {galleryTitle}
-            </h1>
-            <p className="mt-4 text-white/90 text-sm sm:text-base font-light">
-              A curated collection of beautiful photography
-            </p>
-            <a href="#gallery" className="inline-flex items-center justify-center mt-10 text-white/90 hover:text-white transition-colors" aria-label="Scroll to gallery">
-              <ChevronDown className="h-8 w-8 animate-bounce" />
+      {/* Mobile Hero (cover) */}
+      {items.length > 0 && (
+        <section className="md:hidden relative w-full h-[70vh] min-h-[420px] overflow-hidden">
+          {/* Hero Image */}
+          {(() => {
+            const heroItem = items.find(i => !i.isVideo);
+            const heroSrc = heroItem ? getThumbUrl(heroItem) : undefined;
+            return heroSrc ? (
+              <>
+                <img
+                  src={heroSrc}
+                  alt={galleryTitle}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  loading="eager"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/10" />
+              </>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900" />
+            );
+          })()}
+          {/* Hero Text */}
+          <div className="absolute inset-0 flex flex-col items-center justify-end pb-10 px-6 text-center">
+            <h1 className="text-3xl font-semibold text-white tracking-wide">{galleryTitle}</h1>
+            <p className="mt-2 text-white/90 text-sm font-light">A curated collection of beautiful photography</p>
+            <a href="#gallery" className="mt-6 text-white/90 hover:text-white" aria-label="Scroll to gallery">
+              <ChevronDown className="h-7 w-7 animate-bounce" />
             </a>
           </div>
-        </div>
-      </header>
+        </section>
+      )}
+
+      {/* Mobile Brand Bar */}
+      <div className="md:hidden px-6 py-4 flex items-center justify-between">
+        <div className="text-sm tracking-[0.2em] font-semibold text-gray-900">ARIF PHOTOGRAPHY</div>
+        <Menu className="h-5 w-5 text-gray-700" />
+      </div>
 
       {/* Main Content */}
-      <main id="gallery" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main id="gallery" className="max-w-7xl mx-auto px-8 py-8">
         {items.length > 0 && (
           <div className="mb-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -823,7 +800,7 @@ function SharedImages() {
         {folders.length > 0 && (
           <div className="mb-12">
             <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Folders</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-6 gap-4">
               {folders.map((folder) => (
                 <div
                   key={folder.path}
@@ -853,7 +830,7 @@ function SharedImages() {
               <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Images & Videos</h2>
             )}
             <div className={viewMode === 'grid'
-              ? 'columns-1 sm:columns-2 lg:columns-3 gap-6'
+              ? 'columns-2 md:columns-3 gap-4 md:gap-6'
               : 'space-y-3'
             }>
               {currentItems.map((item, index) => (
@@ -861,7 +838,7 @@ function SharedImages() {
                   key={item.id}
                   className={`group relative bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100/50 ${
                     favoritedItems.includes(item.id) ? 'ring-2 ring-red-500 ring-offset-2' : ''
-                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : 'mb-6 break-inside-avoid'}`}
+                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : 'mb-4 md:mb-6 break-inside-avoid'}`}
                   style={{ contentVisibility: 'auto' }}
                 >
                   <button
@@ -871,7 +848,7 @@ function SharedImages() {
                     }}
                     className={`absolute top-3 right-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
                       favoritedItems.includes(item.id)
-                        ? 'bg-red-500/90 text-white shadow-lg'
+                        ? 'bg-red-500/90 text-white'
                         : 'bg-white/90 text-gray-400 hover:text-red-500 hover:bg-white shadow-sm'
                     }`}
                     aria-label={favoritedItems.includes(item.id) ? 'Remove from favorites' : 'Add to favorites'}
@@ -885,7 +862,7 @@ function SharedImages() {
                     }}
                     className={`absolute top-3 left-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
                       downloadSelectedItems.includes(item.id)
-                        ? 'bg-indigo-600/90 text-white shadow-lg'
+                        ? 'bg-indigo-600/90 text-white'
                         : 'bg-white/90 text-gray-500 hover:text-indigo-600 hover:bg-white shadow-sm'
                     }`}
                     aria-label={downloadSelectedItems.includes(item.id) ? 'Unselect for download' : 'Select for download'}
@@ -897,21 +874,32 @@ function SharedImages() {
                     onClick={() => handleViewImage(indexOfFirstItem + index)}
                   >
                     {item.isVideo ? (
-                      <div className="w-full h-56 sm:h-64 bg-gray-900 flex items-center justify-center relative">
+                      <div className="w-full h-64 bg-gray-900 flex items-center justify-center relative">
                         <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
+                        {/* Use metadata-only preload for faster first paint */}
+                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                        <video className="hidden" src={getThumbUrl(item)} preload="metadata" />
                       </div>
                     ) : (
-                      <img
-                        src={item.imageUrl}
-                        alt={item.title}
-                        className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => {
-                          e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
-                          addNotification(`Failed to load ${item.title}`, 'error');
-                        }}
-                      />
+                      (() => {
+                        const isPriority = index < 3; // prioritize first few in view
+                        return (
+                          <img
+                            src={getThumbUrl(item)}
+                            alt={item.title}
+                            className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
+                            loading={isPriority ? 'eager' : 'lazy'}
+                            {...({ fetchpriority: isPriority ? 'high' : 'low' } as any)}
+                            decoding="async"
+                            sizes="(max-width: 9999px) 33vw, 33vw"
+                            style={{ containIntrinsicSize: '400px 300px' }}
+                            onError={(e) => {
+                              e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
+                              addNotification(`Failed to load ${item.title}`, 'error');
+                            }}
+                          />
+                        );
+                      })()
                     )}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
                       <Eye className="h-8 w-8 text-white drop-shadow-lg" />
@@ -1155,7 +1143,7 @@ function SharedImages() {
             <div className="flex items-center justify-center h-full w-full">
               {items[selectedImageIndex]?.isVideo ? (
                 <video
-                  src={items[selectedImageIndex]?.imageUrl}
+                  src={getFullUrl(items[selectedImageIndex])}
                   className="max-w-full max-h-[90vh] object-contain rounded-lg"
                   controls
                   autoPlay
@@ -1165,7 +1153,7 @@ function SharedImages() {
                 />
               ) : (
                 <img
-                  src={items[selectedImageIndex]?.imageUrl}
+                  src={getFullUrl(items[selectedImageIndex])}
                   alt={items[selectedImageIndex]?.title}
                   className="max-w-full max-h-[90vh] object-contain rounded-lg"
                   onClick={(e) => e.stopPropagation()}
@@ -1218,8 +1206,8 @@ function SharedImages() {
       )}
       {/* Enhanced Footer */}
       <footer className="bg-gradient-to-t from-stone-900 to-stone-800 text-white mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
+        <div className="max-w-7xl mx-auto px-8 py-16">
+          <div className="grid grid-cols-3 gap-8 sm:gap-12">
             {/* Brand Section */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
@@ -1276,15 +1264,15 @@ function SharedImages() {
               </div>
               <div className="pt-4 border-t border-white/10">
                 <p className="text-xs text-gray-500 font-light">
-                  © {new Date().getFullYear()} Arif Photography. All rights reserved.
+                  {new Date().getFullYear()} Arif Photography. All rights reserved.
                 </p>
               </div>
             </div>
           </div>
           {/* Bottom Bar */}
           <div className="mt-12 pt-8 border-t border-white/10">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <p className="text-xs text-gray-500 font-light text-center sm:text-left">
+            <div className="flex flex-row items-center justify-between gap-4">
+              <p className="text-xs text-gray-500 font-light text-left">
                 Professional Photography Services
               </p>
               <div className="flex items-center gap-2 text-xs text-gray-500">
