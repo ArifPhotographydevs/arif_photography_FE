@@ -152,6 +152,8 @@ class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { ha
 // -------------------- Configuration --------------------
 // main POST share endpoint (your API Gateway endpoint - POST only)
 const SHARE_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/default/sharelink';
+// backend endpoint to register/access shared folder links
+const SHARE_API_ACCESS = 'https://t5g7mczss8.execute-api.eu-north-1.amazonaws.com/default/SharedLinkAccess';
 
 // If you want a default TTL for presigned links, set it here:
 const DEFAULT_EXPIRY_SECONDS = 3600;
@@ -639,10 +641,67 @@ function Gallery() {
   };
 
   /**
+   * requestFolderShareLinksFromServer
+   * - POSTs to SHARE_API_ACCESS with body: { folders: string[], pin?: string }
+   * - Accepts same flexible response shapes as requestShareLinksFromServer.
+   */
+  const requestFolderShareLinksFromServer = async (folders: string[], pin?: string) => {
+    try {
+      if (!Array.isArray(folders) || folders.length === 0) {
+        throw new Error('No folders provided to requestFolderShareLinksFromServer');
+      }
+      // API contract: POST { action: "generate_share_link", folderName, pin? }
+      const results: string[] = [];
+      for (const folderPath of folders) {
+        const payload: any = {
+          action: 'generate_share_link',
+          folderName: folderPath.replace(/^\//, ''), // send clean name
+        };
+        if (pin) payload.pin = pin;
+        const res = await fetch(SHARE_API_ACCESS, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+          body: JSON.stringify(payload),
+        });
+        const txt = await res.text();
+        let parsed: any = null;
+        try {
+          parsed = txt ? JSON.parse(txt) : null;
+        } catch {
+          parsed = null;
+        }
+        if (!res.ok) {
+          let serverMsg = txt;
+          if (parsed && parsed.message) serverMsg = parsed.message;
+          throw new Error(`Folder share server error: ${res.status} - ${serverMsg}`);
+        }
+        const data = parsed || (txt ? JSON.parse(txt) : null);
+        if (!data) throw new Error('Empty response from folder share server');
+        if (data.success === false) {
+          const serverErr = data.message || JSON.stringify(data);
+          throw new Error(serverErr);
+        }
+        // Expected response shape includes shareUrl
+        const url = (data as any).shareUrl || (data as any).link || (data as any).url;
+        if (typeof url === 'string' && url.length > 0) {
+          results.push(url);
+        } else {
+          throw new Error('Unexpected folder share response: ' + JSON.stringify(data));
+        }
+      }
+      return results;
+    } catch (err: any) {
+      console.error('requestFolderShareLinksFromServer failed:', err);
+      throw err;
+    }
+  };
+
+  /**
    * generateShareableLinks
    * Accepts selected IDs (either item.key or folder.path).
    * For files: tries to use item.imageUrl if present, otherwise asks server for presigned link.
-   * For folders: calls server to presign objects under prefixes.
+   * For folders: calls backend to generate shared links.
    * Returns string[] of links.
    */
   const generateShareableLinks = async (forItemIds: string[]) => {
@@ -650,12 +709,10 @@ function Gallery() {
     const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
     const links: string[] = [];
 
-    // Generate share links for folders locally
-    const baseUrl = window.location.origin || 'http://localhost:5173';
-    for (const folderPath of folderPaths) {
-      const encodedPath = encodeURIComponent(folderPath);
-      const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
-      links.push(shareLink);
+    // Generate share links for folders via backend
+    if (folderPaths.length > 0) {
+      const folderLinks = await requestFolderShareLinksFromServer(folderPaths, sharePin || undefined);
+      links.push(...folderLinks);
     }
 
     // Handle files
