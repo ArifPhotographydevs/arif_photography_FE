@@ -828,18 +828,76 @@ function Gallery() {
     }
   };
 
+  // Call backend to check current status of a share link
+  const getShareLinkStatusFromServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'get_share_link_status',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to get share link status from server';
+        console.error('get_share_link_status API error:', msg);
+        addNotification(`Server status check failed: ${msg}`, 'error');
+        return null;
+      }
+      return (data as any).shareLink || null;
+    } catch (e: any) {
+      console.error('get_share_link_status API call failed:', e);
+      addNotification(
+        `Server status check failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+      return null;
+    }
+  };
+
   // Toggle active/inactive state for a share link
-  const toggleShareLinkStatus = (linkId: string, nextActive: boolean) => {
-    // If turning off, call backend revoke API (best-effort)
-    if (!nextActive) {
-      const current = activeShareLinks.find((l) => l.id === linkId);
-      if (current?.sharedId) {
-        revokeShareLinkOnServer(current.sharedId);
+  const toggleShareLinkStatus = async (linkId: string, nextActive: boolean) => {
+    const current = activeShareLinks.find((l) => l.id === linkId);
+
+    if (!current?.sharedId) {
+      console.debug('[share] toggleShareLinkStatus: no sharedId found, updating UI only');
+    } else if (!nextActive) {
+      // Disabling: call revoke API
+      console.debug(
+        '[share] Disabling link, calling revoke_share_link for sharedId:',
+        current.sharedId
+      );
+      await revokeShareLinkOnServer(current.sharedId);
+    } else {
+      // Enabling: check status on server; if still revoked, do not enable locally
+      console.debug(
+        '[share] Enabling link, checking get_share_link_status for sharedId:',
+        current.sharedId
+      );
+      const status = await getShareLinkStatusFromServer(current.sharedId);
+      if (!status || status.isActive === false) {
+        addNotification(
+          'This link is revoked or inactive on the server and cannot be re-activated.',
+          'error'
+        );
+        return;
       }
     }
 
-    setActiveShareLinks(prev =>
-      prev.map(link =>
+    setActiveShareLinks((prev) =>
+      prev.map((link) =>
         link.id === linkId ? { ...link, isActive: nextActive } : link
       )
     );
@@ -868,6 +926,19 @@ function Gallery() {
           try {
             const data = JSON.parse(localStorage.getItem(key) || '{}');
             if (data.id && data.link) {
+              // Backfill sharedId for older entries that didn't store it
+              let sharedId = data.sharedId;
+              if (!sharedId) {
+                try {
+                  const urlObj = new URL(data.link);
+                  const parts = urlObj.pathname.split('/').filter(Boolean);
+                  sharedId = parts[parts.length - 1];
+                  data.sharedId = sharedId;
+                  localStorage.setItem(key, JSON.stringify(data));
+                } catch {
+                  sharedId = undefined;
+                }
+              }
               links.push({
                 id: data.id,
                 link: data.link,
@@ -875,6 +946,7 @@ function Gallery() {
                 hasPin: data.hasPin || false,
                 isActive: data.isActive !== false, // Default to true
                 items: data.items || [],
+                sharedId,
               });
             }
           } catch (error) {

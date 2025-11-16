@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, Loader2, Lock } from 'lucide-react';
 
@@ -10,6 +10,65 @@ function SharedFolder() {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [isRevoked, setIsRevoked] = useState(false);
+
+  // On mount, check share link status so revoked links show a clear permission error
+  useEffect(() => {
+    const checkStatus = async () => {
+      if (!sharedId) {
+        setStatusLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(SHARE_API_ACCESS, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+          body: JSON.stringify({
+            action: 'get_share_link_status',
+            sharedId,
+          }),
+        });
+        const txt = await res.text();
+        let data: any = null;
+        try {
+          data = txt ? JSON.parse(txt) : null;
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok || !data || data.success === false) {
+          // Treat unknown/failed status as revoked for safety
+          setIsRevoked(true);
+          setError(
+            (data && data.message) ||
+              'You do not have permission to access this shared folder.'
+          );
+          return;
+        }
+
+        const link = (data as any).shareLink;
+        if (link && link.isActive === false) {
+          setIsRevoked(true);
+          setError(
+            'This share link has been revoked or expired. You do not have permission to access this folder.'
+          );
+        }
+      } catch (e: any) {
+        // On network/parse errors, assume no permission
+        setIsRevoked(true);
+        setError(
+          e?.message ||
+            'You do not have permission to access this shared folder.'
+        );
+      } finally {
+        setStatusLoading(false);
+      }
+    };
+
+    checkStatus();
+  }, [sharedId]);
 
   const handleVerify = async () => {
     if (!sharedId || !pin) return;
@@ -50,6 +109,46 @@ function SharedFolder() {
       setLoading(false);
     }
   };
+
+  // While we are checking server status initially
+  if (statusLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm border border-amber-100 flex flex-col items-center">
+          <Loader2 className="h-8 w-8 text-amber-700 animate-spin mb-4" />
+          <p className="text-gray-700 text-sm">Checking link permissions…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If revoked or no permission, show a clear message instead of PIN form
+  if (isRevoked) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md border border-amber-100">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-red-50 rounded-full mb-6">
+              <AlertCircle className="h-10 w-10 text-red-500" />
+            </div>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+              Access Denied
+            </h2>
+            <p className="text-gray-600 text-sm leading-relaxed">
+              {error ||
+                "You don't have permission to access this shared folder. The link may have been revoked or expired."}
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/')}
+            className="w-full py-3 px-6 bg-amber-900 text-white rounded-xl hover:bg-amber-800 transition-colors font-medium"
+          >
+            Go to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
