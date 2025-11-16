@@ -195,6 +195,7 @@ function Gallery() {
     hasPin: boolean;
     isActive: boolean;
     items: string[];
+    sharedId?: string; // Backend sharedId for revoke/status APIs
   }>>([]);
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -642,8 +643,8 @@ function Gallery() {
 
   /**
    * requestFolderShareLinksFromServer
-   * - POSTs to SHARE_API_ACCESS with body: { folders: string[], pin?: string }
-   * - Accepts same flexible response shapes as requestShareLinksFromServer.
+   * - POSTs to SHARE_API_ACCESS with body: { action: "generate_share_link", folderName, pin? }
+   * - Returns array of shareUrl strings.
    */
   const requestFolderShareLinksFromServer = async (folders: string[], pin?: string) => {
     try {
@@ -761,11 +762,98 @@ function Gallery() {
     }
   };
 
-  // Revoke/delete a share link
-  const revokeShareLink = (linkId: string) => {
-    localStorage.removeItem(`share_${linkId}`);
-    setActiveShareLinks(prev => prev.filter(link => link.id !== linkId));
-    addNotification('Share link revoked successfully', 'success');
+  // Disable (mark inactive) a share link and notify backend (best-effort)
+  const revokeShareLink = async (linkId: string) => {
+    // Call backend if we have a sharedId
+    const current = activeShareLinks.find((l) => l.id === linkId);
+    if (current?.sharedId) {
+      revokeShareLinkOnServer(current.sharedId);
+    }
+
+    // Update in React state
+    setActiveShareLinks(prev =>
+      prev.map(link =>
+        link.id === linkId ? { ...link, isActive: false } : link
+      )
+    );
+
+    // Persist inactive status in localStorage (if present)
+    try {
+      const raw = localStorage.getItem(`share_${linkId}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        data.isActive = false;
+        localStorage.setItem(`share_${linkId}`, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error('Failed to update share link status in localStorage', e);
+    }
+
+    addNotification('Share link disabled successfully', 'success');
+  };
+
+  // Call backend to revoke a share link by its sharedId
+  const revokeShareLinkOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'revoke_share_link',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to revoke share link on server';
+        console.error('revoke_share_link API error:', msg);
+        addNotification(`Server revoke failed: ${msg}`, 'error');
+      }
+    } catch (e: any) {
+      console.error('revoke_share_link API call failed:', e);
+      addNotification(
+        `Server revoke failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+    }
+  };
+
+  // Toggle active/inactive state for a share link
+  const toggleShareLinkStatus = (linkId: string, nextActive: boolean) => {
+    // If turning off, call backend revoke API (best-effort)
+    if (!nextActive) {
+      const current = activeShareLinks.find((l) => l.id === linkId);
+      if (current?.sharedId) {
+        revokeShareLinkOnServer(current.sharedId);
+      }
+    }
+
+    setActiveShareLinks(prev =>
+      prev.map(link =>
+        link.id === linkId ? { ...link, isActive: nextActive } : link
+      )
+    );
+
+    try {
+      const raw = localStorage.getItem(`share_${linkId}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        data.isActive = nextActive;
+        localStorage.setItem(`share_${linkId}`, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error('Failed to toggle share link status in localStorage', e);
+    }
   };
 
   // Load active share links from localStorage on mount
@@ -822,6 +910,14 @@ const handleShare = async () => {
     // Create share link tracking
     const linkId = Math.random().toString(36).substr(2, 9);
     const now = Date.now();
+    let sharedId: string | undefined;
+    try {
+      const urlObj = new URL(links[0]);
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      sharedId = parts[parts.length - 1];
+    } catch {
+      sharedId = undefined;
+    }
     const newShareLink = {
       id: linkId,
       link: links[0], // Use first link as primary
@@ -829,6 +925,7 @@ const handleShare = async () => {
       hasPin: !!sharePin,
       isActive: true,
       items: selectedItems,
+      sharedId,
     };
     
     // Store in localStorage with PIN if provided
@@ -2946,11 +3043,15 @@ const handleShare = async () => {
                                           🔒 PIN Protected
                                         </span>
                                       )}
-                                      {!shareLink.isActive && (
-                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
-                                          Revoked
-                                        </span>
-                                      )}
+                                      <span
+                                        className={`px-2 py-0.5 text-xs rounded-full ${
+                                          shareLink.isActive
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-gray-200 text-gray-700'
+                                        }`}
+                                      >
+                                        {shareLink.isActive ? 'Active' : 'Inactive'}
+                                      </span>
                                     </div>
                                     <p className="text-xs text-gray-500">
                                       Created: {new Date(shareLink.createdAt).toLocaleString()}
@@ -2960,6 +3061,16 @@ const handleShare = async () => {
                                     </p>
                                   </div>
                                   <div className="flex items-center space-x-1 ml-2">
+                                    <button
+                                      onClick={() => toggleShareLinkStatus(shareLink.id, !shareLink.isActive)}
+                                      className={`px-2 py-1 text-xs rounded border ${
+                                        shareLink.isActive
+                                          ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                          : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                                      }`}
+                                    >
+                                      {shareLink.isActive ? 'Disable' : 'Enable'}
+                                    </button>
                                     <button
                                       onClick={() => copyToClipboard(shareLink.link)}
                                       className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
