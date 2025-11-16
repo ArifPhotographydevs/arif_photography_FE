@@ -23,10 +23,6 @@ import {
   Instagram,
   Facebook,
   Camera,
-<<<<<<< Updated upstream
-  Menu,
-=======
->>>>>>> Stashed changes
 } from 'lucide-react';
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
@@ -72,11 +68,7 @@ function SharedImages() {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-<<<<<<< Updated upstream
-  const itemsPerPage = 9;
-=======
   const itemsPerPage = 15;
->>>>>>> Stashed changes
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
   // Download flow modal
@@ -96,12 +88,8 @@ function SharedImages() {
     watermarkEnabled: false,
   });
 
-<<<<<<< Updated upstream
-  // Hero Image removed with header
-=======
   // Hero Image
   const [heroImage, setHeroImage] = useState<string | null>(null);
->>>>>>> Stashed changes
 
   // PIN Protection
   const [isPinRequired, setIsPinRequired] = useState(false);
@@ -260,14 +248,10 @@ function SharedImages() {
         .filter((item): item is GalleryItem => item !== null);
       setItems(mappedItems);
 
-<<<<<<< Updated upstream
-      // No hero image usage
-=======
       // Set hero image as first image if available
       if (mappedItems.length > 0 && !mappedItems[0].isVideo) {
         setHeroImage(mappedItems[0].imageUrl);
       }
->>>>>>> Stashed changes
     } catch (err: any) {
       setError(`Failed to load folder items: ${err.message}`);
     } finally {
@@ -283,38 +267,6 @@ function SharedImages() {
   // Preload initial images and warm Cache API for same-origin only (silent, no UI state)
   useEffect(() => {
     if (items.length === 0) return;
-<<<<<<< Updated upstream
-    const preloadCount = Math.min(6, items.length);
-    const toPreload = items.slice(0, preloadCount).map(i => i.imageUrl);
-
-    // Best-effort Cache API warm-up for same-origin URLs only (avoid CORS console noise)
-    const defer = (cb: () => void) => {
-      // Defer preloading so it doesn't compete with initial viewport images
-      // Prefer requestIdleCallback when available
-      // @ts-ignore
-      if (typeof window.requestIdleCallback === 'function') {
-        // @ts-ignore
-        window.requestIdleCallback(cb, { timeout: 2000 });
-      } else {
-        setTimeout(cb, 300);
-      }
-    };
-
-    defer(() => {
-      (async () => {
-        try {
-          if (!('caches' in window)) return;
-          const cache = await caches.open('apfe-image-cache');
-          const sameOrigin = toPreload.filter((u) => {
-            try { return new URL(u, window.location.href).origin === window.location.origin; } catch { return false; }
-          });
-          await Promise.all(sameOrigin.map(async (url) => {
-            try { await cache.add(url); } catch {}
-          }));
-        } catch {}
-      })();
-    });
-=======
     const preloadCount = Math.min(12, items.length);
     const toPreload = items.slice(0, preloadCount).map(i => i.imageUrl);
 
@@ -331,18 +283,11 @@ function SharedImages() {
         }));
       } catch {}
     })();
->>>>>>> Stashed changes
 
     const imgs: HTMLImageElement[] = [];
     toPreload.forEach((src) => {
       const img = new Image();
       img.decoding = 'async';
-<<<<<<< Updated upstream
-      // Lower preloading priority
-      // @ts-ignore
-      if ('fetchPriority' in img) (img as any).fetchPriority = 'low';
-=======
->>>>>>> Stashed changes
       img.src = src;
       imgs.push(img);
     });
@@ -453,7 +398,9 @@ function SharedImages() {
     }, 5000);
   };
 
-  // Removed back navigation button with header
+  const handleBackToGallery = () => {
+    window.history.back();
+  };
 
   // Quick download from toolbar: download selected-for-download, else all
   const handleQuickDownload = async () => {
@@ -470,24 +417,6 @@ function SharedImages() {
     await handleDownloadSelected(downloadAll);
   };
 
-<<<<<<< Updated upstream
-=======
-  // Quick download from toolbar: download selected-for-download, else all
-  const handleQuickDownload = async () => {
-    const downloadAll = downloadSelectedItems.length === 0;
-    if (!permissions.canDownload) {
-      addNotification('Downloads are not permitted in this gallery', 'error');
-      return;
-    }
-    if (!downloadAll && downloadSelectedItems.length === 0) {
-      addNotification('No items selected for download', 'error');
-      return;
-    }
-    addNotification(downloadAll ? 'Starting download for all items…' : `Starting download for ${downloadSelectedItems.length} selected item(s)…`, 'info');
-    await handleDownloadSelected(downloadAll);
-  };
-
->>>>>>> Stashed changes
   // Blob save only (no preview/new tab)
   const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
     try {
@@ -505,12 +434,8 @@ function SharedImages() {
       addNotification(`Download started for ${filename}`, 'info');
       return true;
     } catch (err: any) {
-<<<<<<< Updated upstream
-      addNotification('Download blocked by cross-origin policy. Please enable CORS on the file host or use the app domain.', 'error');
-=======
       console.error('Blob download failed', err);
       addNotification(`Download failed: ${err.message}`, 'error');
->>>>>>> Stashed changes
       return false;
     }
   };
@@ -774,48 +699,6 @@ function SharedImages() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50">
-<<<<<<< Updated upstream
-      {/* Mobile Hero (cover) */}
-      {items.length > 0 && (
-        <section className="md:hidden relative w-full h-[70vh] min-h-[420px] overflow-hidden">
-          {/* Hero Image */}
-          {(() => {
-            const heroItem = items.find(i => !i.isVideo);
-            const heroSrc = heroItem ? getThumbUrl(heroItem) : undefined;
-            return heroSrc ? (
-              <>
-                <img
-                  src={heroSrc}
-                  alt={galleryTitle}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  loading="eager"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/10" />
-              </>
-            ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900" />
-            );
-          })()}
-          {/* Hero Text */}
-          <div className="absolute inset-0 flex flex-col items-center justify-end pb-10 px-6 text-center">
-            <h1 className="text-3xl font-semibold text-white tracking-wide">{galleryTitle}</h1>
-            <p className="mt-2 text-white/90 text-sm font-light">A curated collection of beautiful photography</p>
-            <a href="#gallery" className="mt-6 text-white/90 hover:text-white" aria-label="Scroll to gallery">
-              <ChevronDown className="h-7 w-7 animate-bounce" />
-            </a>
-          </div>
-        </section>
-      )}
-
-      {/* Mobile Brand Bar */}
-      <div className="md:hidden px-6 py-4 flex items-center justify-between">
-        <div className="text-sm tracking-[0.2em] font-semibold text-gray-900">ARIF PHOTOGRAPHY</div>
-        <Menu className="h-5 w-5 text-gray-700" />
-      </div>
-
-      {/* Main Content */}
-      <main id="gallery" className="max-w-7xl mx-auto px-8 py-8">
-=======
       {/* Hero Header with Image */}
       <header className="relative w-full h-64 sm:h-[420px] md:h-screen md:min-h-[600px] overflow-hidden">
         {/* Hero Image Background */}
@@ -893,7 +776,6 @@ function SharedImages() {
 
       {/* Main Content */}
       <main id="gallery" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
->>>>>>> Stashed changes
         {items.length > 0 && (
           <div className="mb-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -961,24 +843,15 @@ function SharedImages() {
               <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Images & Videos</h2>
             )}
             <div className={viewMode === 'grid'
-<<<<<<< Updated upstream
-              ? 'columns-2 md:columns-3 gap-4 md:gap-6'
-              : 'space-y-3'
-=======
               ? 'columns-2 sm:columns-3 lg:columns-3 gap-2 sm:gap-4 lg:gap-6'
               : 'space-y-2 sm:space-y-3'
->>>>>>> Stashed changes
             }>
               {currentItems.map((item, index) => (
                 <div
                   key={item.id}
                   className={`group relative bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100/50 ${
                     favoritedItems.includes(item.id) ? 'ring-2 ring-red-500 ring-offset-2' : ''
-<<<<<<< Updated upstream
-                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : 'mb-4 md:mb-6 break-inside-avoid'}`}
-=======
                   } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-3 p-3 sm:gap-4 sm:p-4' : 'mb-4 sm:mb-6 break-inside-avoid'}`}
->>>>>>> Stashed changes
                   style={{ contentVisibility: 'auto' }}
                 >
                   <button
@@ -988,11 +861,7 @@ function SharedImages() {
                     }}
                     className={`absolute top-3 right-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
                       favoritedItems.includes(item.id)
-<<<<<<< Updated upstream
-                        ? 'bg-red-500/90 text-white'
-=======
                         ? 'bg-red-500/90 text-white shadow-lg'
->>>>>>> Stashed changes
                         : 'bg-white/90 text-gray-400 hover:text-red-500 hover:bg-white shadow-sm'
                     }`}
                     aria-label={favoritedItems.includes(item.id) ? 'Remove from favorites' : 'Add to favorites'}
@@ -1006,11 +875,7 @@ function SharedImages() {
                     }}
                     className={`absolute top-3 left-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
                       downloadSelectedItems.includes(item.id)
-<<<<<<< Updated upstream
-                        ? 'bg-indigo-600/90 text-white'
-=======
                         ? 'bg-indigo-600/90 text-white shadow-lg'
->>>>>>> Stashed changes
                         : 'bg-white/90 text-gray-500 hover:text-indigo-600 hover:bg-white shadow-sm'
                     }`}
                     aria-label={downloadSelectedItems.includes(item.id) ? 'Unselect for download' : 'Select for download'}
@@ -1022,34 +887,6 @@ function SharedImages() {
                     onClick={() => handleViewImage(indexOfFirstItem + index)}
                   >
                     {item.isVideo ? (
-<<<<<<< Updated upstream
-                      <div className="w-full h-64 bg-gray-900 flex items-center justify-center relative">
-                        <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
-                        {/* Use metadata-only preload for faster first paint */}
-                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                        <video className="hidden" src={getThumbUrl(item)} preload="metadata" />
-                      </div>
-                    ) : (
-                      (() => {
-                        const isPriority = index < 3; // prioritize first few in view
-                        return (
-                          <img
-                            src={getThumbUrl(item)}
-                            alt={item.title}
-                            className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
-                            loading={isPriority ? 'eager' : 'lazy'}
-                            {...({ fetchpriority: isPriority ? 'high' : 'low' } as any)}
-                            decoding="async"
-                            sizes="(max-width: 9999px) 33vw, 33vw"
-                            style={{ containIntrinsicSize: '400px 300px' }}
-                            onError={(e) => {
-                              e.currentTarget.src = 'https://via.placeholder.com/300x300?text=Image+Not+Available';
-                              addNotification(`Failed to load ${item.title}`, 'error');
-                            }}
-                          />
-                        );
-                      })()
-=======
                       <div className="w-full h-56 sm:h-64 bg-gray-900 flex items-center justify-center relative">
                         <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
                       </div>
@@ -1065,7 +902,6 @@ function SharedImages() {
                           addNotification(`Failed to load ${item.title}`, 'error');
                         }}
                       />
->>>>>>> Stashed changes
                     )}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
                       <Eye className="h-8 w-8 text-white drop-shadow-lg" />
@@ -1372,13 +1208,8 @@ function SharedImages() {
       )}
       {/* Enhanced Footer */}
       <footer className="bg-gradient-to-t from-stone-900 to-stone-800 text-white mt-20">
-<<<<<<< Updated upstream
-        <div className="max-w-7xl mx-auto px-8 py-16">
-          <div className="grid grid-cols-3 gap-8 sm:gap-12">
-=======
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
->>>>>>> Stashed changes
             {/* Brand Section */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
@@ -1440,21 +1271,6 @@ function SharedImages() {
               </div>
             </div>
           </div>
-<<<<<<< Updated upstream
-          {/* Bottom Bar */}
-          <div className="mt-12 pt-8 border-t border-white/10">
-            <div className="flex flex-row items-center justify-between gap-4">
-              <p className="text-xs text-gray-500 font-light text-left">
-                Professional Photography Services
-              </p>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Camera className="h-3 w-3" />
-                <span className="font-light">Secure Gallery Access</span>
-              </div>
-            </div>
-          </div>
-=======
->>>>>>> Stashed changes
         </div>
       </footer>
     </div>
