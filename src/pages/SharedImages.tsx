@@ -700,7 +700,7 @@ function SharedImages() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50">
       {/* Hero Header with Image */}
-      <header className="relative w-full h-screen min-h-[600px] overflow-hidden">
+      <header className="relative w-full h-64 sm:h-[420px] md:h-screen md:min-h-[600px] overflow-hidden">
         {/* Hero Image Background */}
         {heroImage ? (
           <div className="absolute inset-0">
@@ -716,9 +716,8 @@ function SharedImages() {
             <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptMC00djJoLTJ2LTJoMnptLTQtNHYyaC0ydi0yaDJ6Ii8+PC9nPjwvZz48L3N2Zz4=")' }} />
           </div>
         )}
-
         {/* Navigation Bar */}
-        <div className="relative z-10 bg-black/30 backdrop-blur-md border-b border-white/10">
+        <div className="relative z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16 sm:h-20">
               <div className="flex items-center space-x-4 sm:space-x-6 flex-1 min-w-0">
@@ -730,17 +729,8 @@ function SharedImages() {
                   <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
                   <span className="text-sm font-medium hidden sm:inline">Home</span>
                 </button>
-                <div className="h-6 w-px bg-white/30" />
-                <div className="flex-1 min-w-0">
-                  <h1 className="text-xl sm:text-2xl md:text-3xl font-light text-white truncate tracking-tight uppercase">
-                    {galleryTitle}
-                  </h1>
-                  <p className="text-xs sm:text-sm text-white/80 mt-1 hidden sm:block font-light">
-                    A curated collection of beautiful photography
-                  </p>
-                </div>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setViewMode('grid')}
                   className={`p-2 sm:p-2.5 rounded-lg transition-all backdrop-blur-md ${
@@ -768,7 +758,7 @@ function SharedImages() {
           </div>
         </div>
         {/* Hero Content */}
-        <div className="absolute inset-0 z-10 flex items-end justify-center pb-16 md:pb-24 lg:pb-28">
+        <div className="absolute inset-0 z-10 hidden md:flex items-end justify-center pb-16 md:pb-24 lg:pb-28">
           <div className="text-center px-4">
             <div className="text-white/80 tracking-[0.25em] uppercase mb-4">Arif Photography</div>
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white drop-shadow-lg">
@@ -853,15 +843,15 @@ function SharedImages() {
               <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Images & Videos</h2>
             )}
             <div className={viewMode === 'grid'
-              ? 'columns-1 sm:columns-2 lg:columns-3 gap-6'
-              : 'space-y-3'
+              ? 'columns-2 sm:columns-3 lg:columns-3 gap-2 sm:gap-4 lg:gap-6'
+              : 'space-y-2 sm:space-y-3'
             }>
               {currentItems.map((item, index) => (
                 <div
                   key={item.id}
                   className={`group relative bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100/50 ${
                     favoritedItems.includes(item.id) ? 'ring-2 ring-red-500 ring-offset-2' : ''
-                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-4 p-4' : 'mb-6 break-inside-avoid'}`}
+                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-3 p-3 sm:gap-4 sm:p-4' : 'mb-4 sm:mb-6 break-inside-avoid'}`}
                   style={{ contentVisibility: 'auto' }}
                 >
                   <button
@@ -1276,20 +1266,8 @@ function SharedImages() {
               </div>
               <div className="pt-4 border-t border-white/10">
                 <p className="text-xs text-gray-500 font-light">
-                  © {new Date().getFullYear()} Arif Photography. All rights reserved.
+                  &copy; {new Date().getFullYear()} Arif Photography | All rights reserved.
                 </p>
-              </div>
-            </div>
-          </div>
-          {/* Bottom Bar */}
-          <div className="mt-12 pt-8 border-t border-white/10">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <p className="text-xs text-gray-500 font-light text-center sm:text-left">
-                Professional Photography Services
-              </p>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Camera className="h-3 w-3" />
-                <span className="font-light">Secure Gallery Access</span>
               </div>
             </div>
           </div>
