@@ -1,27 +1,3 @@
-  // Drag and drop reordering for compact grid
-  const handleDragStartItem = (id: string) => setDragId(id);
-  const handleDragOverItem = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-  const handleDropOnItem = (targetId: string) => {
-    if (!dragId || dragId === targetId) return;
-    setSortBy('custom');
-    setItems((prev) => {
-      const idsInView = new Set(filteredImages.map((i) => i.id));
-      const currentOrder = filteredImages.map((i) => i.id);
-      const from = currentOrder.indexOf(dragId);
-      const to = currentOrder.indexOf(targetId);
-      if (from === -1 || to === -1) return prev;
-      const newOrder = [...currentOrder];
-      const [moved] = newOrder.splice(from, 1);
-      newOrder.splice(to, 0, moved);
-      const orderMap = new Map<string, number>();
-      newOrder.forEach((id, i) => orderMap.set(id, i));
-      return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
-    });
-    setDragId(null);
-  };
-
 import React, { useState, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
@@ -58,6 +34,7 @@ import {
   FolderPlus,
   Play,
   Upload,
+  GripVertical,
 } from 'lucide-react';
 
 // -------------------- Interfaces --------------------
@@ -219,7 +196,8 @@ function Gallery() {
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
-  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null); // For image reordering drag
+  const [dragOverId, setDragOverId] = useState<string | null>(null); // Track which item is being dragged over
   const [watermarkEnabled, setWatermarkEnabled] = useState(false); // Enable watermark for uploads
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('bottom-right'); // Default watermark position
   const [watermarkImage, setWatermarkImage] = useState<string | null>(null); // Watermark image (base64)
@@ -1082,6 +1060,63 @@ const handleShare = async () => {
         return aValue < bValue ? 1 : -1;
       }
     });
+
+  // -------------------- Drag and Drop Reordering Handlers --------------------
+  const handleDragStartItem = useCallback((id: string) => {
+    setDragId(id);
+  }, []);
+
+  const handleDragOverItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragId && dragId !== targetId) {
+      setDragOverId(targetId);
+    }
+  }, [dragId]);
+
+  const handleDragLeaveItem = useCallback(() => {
+    setDragOverId(null);
+  }, []);
+
+  const handleDropOnItem = useCallback((targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      setDragOverId(null);
+      return;
+    }
+    
+    setSortBy('custom');
+    setItems((prev) => {
+      const idsInView = new Set(filteredImages.map((i) => i.id));
+      const currentOrder = filteredImages.map((i) => i.id);
+      const from = currentOrder.indexOf(dragId);
+      const to = currentOrder.indexOf(targetId);
+      
+      if (from === -1 || to === -1) {
+        setDragId(null);
+        setDragOverId(null);
+        return prev;
+      }
+      
+      const newOrder = [...currentOrder];
+      const [moved] = newOrder.splice(from, 1);
+      newOrder.splice(to, 0, moved);
+      
+      const orderMap = new Map<string, number>();
+      newOrder.forEach((id, i) => orderMap.set(id, i));
+      
+      return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
+    });
+    
+    setDragId(null);
+    setDragOverId(null);
+    addNotification('Image order updated', 'success');
+  }, [dragId, filteredImages, setSortBy, addNotification]);
+
+  const handleDragEndItem = useCallback(() => {
+    setDragId(null);
+    setDragOverId(null);
+  }, []);
 
   // -------------------- Breadcrumbs --------------------
   const getBreadcrumbs = () => {
@@ -2711,17 +2746,28 @@ const handleShare = async () => {
                           className={`group relative ${
                             selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
                           } ${
+                            dragId === item.id ? 'opacity-50 scale-95 cursor-grabbing' : ''
+                          } ${
+                            dragOverId === item.id && dragId !== item.id ? 'ring-2 ring-blue-400 ring-offset-2 scale-105' : ''
+                          } ${
                             compactView && viewMode === 'grid'
                               ? 'rounded-lg overflow-hidden break-inside-avoid inline-block w-full mb-3'
                               : (viewMode === 'grid'
                                   ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
                                   : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
-                          draggable={compactView && viewMode === 'grid'}
+                          draggable={true}
                           onDragStart={() => handleDragStartItem(item.id)}
-                          onDragOver={handleDragOverItem}
+                          onDragOver={(e) => handleDragOverItem(e, item.id)}
+                          onDragLeave={handleDragLeaveItem}
                           onDrop={() => handleDropOnItem(item.id)}
+                          onDragEnd={handleDragEndItem}
+                          style={{ cursor: dragId === item.id ? 'grabbing' : 'grab' }}
                         >
+                          {/* Drag Handle */}
+                          <div className="absolute top-2 left-2 z-10 p-1.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-grab active:cursor-grabbing">
+                            <GripVertical className="h-4 w-4 text-gray-500" />
+                          </div>
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(item.id)}
@@ -2736,6 +2782,7 @@ const handleShare = async () => {
                               <div className="relative">
                                 <video
                                   src={item.imageUrl}
+                                  draggable={false}
                                   className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   preload="none"
                                   onError={handleImageError}
@@ -2767,6 +2814,7 @@ const handleShare = async () => {
                                 <img
                                   src={compactView && viewMode === 'grid' ? item.imageUrl : getOptimizedImageUrl(item.imageUrl, viewMode === 'grid')}
                                   alt={item.title}
+                                  draggable={false}
                                   className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   onError={handleImageError}
                                   onLoad={() => handleImageLoad(item.id)}
