@@ -198,6 +198,7 @@ function Gallery() {
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
   const [dragId, setDragId] = useState<string | null>(null); // For image reordering drag
   const [dragOverId, setDragOverId] = useState<string | null>(null); // Track which item is being dragged over
+  const dragJustEndedRef = useRef(false); // Track if drag just ended to prevent click
   const [watermarkEnabled, setWatermarkEnabled] = useState(false); // Enable watermark for uploads
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('bottom-right'); // Default watermark position
   const [watermarkImage, setWatermarkImage] = useState<string | null>(null); // Watermark image (base64)
@@ -1062,11 +1063,24 @@ const handleShare = async () => {
     });
 
   // -------------------- Drag and Drop Reordering Handlers --------------------
-  const handleDragStartItem = useCallback((id: string) => {
+  const handleDragStartItem = useCallback((e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
     setDragId(id);
+    dragJustEndedRef.current = false;
   }, []);
 
   const handleDragOverItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    
+    if (dragId && dragId !== targetId) {
+      setDragOverId(targetId);
+    }
+  }, [dragId]);
+
+  const handleDragEnterItem = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
     if (dragId && dragId !== targetId) {
@@ -1074,11 +1088,21 @@ const handleShare = async () => {
     }
   }, [dragId]);
 
-  const handleDragLeaveItem = useCallback(() => {
-    setDragOverId(null);
+  const handleDragLeaveItem = useCallback((e: React.DragEvent) => {
+    // Only clear if we're actually leaving the element (not just moving to a child)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOverId(null);
+    }
   }, []);
 
-  const handleDropOnItem = useCallback((targetId: string) => {
+  const handleDropOnItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
     if (!dragId || dragId === targetId) {
       setDragId(null);
       setDragOverId(null);
@@ -1116,6 +1140,11 @@ const handleShare = async () => {
   const handleDragEndItem = useCallback(() => {
     setDragId(null);
     setDragOverId(null);
+    dragJustEndedRef.current = true;
+    // Reset after a short delay to allow click events
+    setTimeout(() => {
+      dragJustEndedRef.current = false;
+    }, 100);
   }, []);
 
   // -------------------- Breadcrumbs --------------------
@@ -2746,9 +2775,9 @@ const handleShare = async () => {
                           className={`group relative ${
                             selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
                           } ${
-                            dragId === item.id ? 'opacity-50 scale-95 cursor-grabbing' : ''
+                            dragId === item.id ? 'opacity-50 scale-95 cursor-grabbing z-50 shadow-2xl' : ''
                           } ${
-                            dragOverId === item.id && dragId !== item.id ? 'ring-2 ring-blue-400 ring-offset-2 scale-105' : ''
+                            dragOverId === item.id && dragId !== item.id ? 'ring-2 ring-blue-400 ring-offset-2 scale-105 bg-blue-50/50 z-40' : ''
                           } ${
                             compactView && viewMode === 'grid'
                               ? 'rounded-lg overflow-hidden break-inside-avoid inline-block w-full mb-3'
@@ -2757,12 +2786,16 @@ const handleShare = async () => {
                                   : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
                           draggable={true}
-                          onDragStart={() => handleDragStartItem(item.id)}
+                          onDragStart={(e) => handleDragStartItem(e, item.id)}
+                          onDragEnter={(e) => handleDragEnterItem(e, item.id)}
                           onDragOver={(e) => handleDragOverItem(e, item.id)}
                           onDragLeave={handleDragLeaveItem}
-                          onDrop={() => handleDropOnItem(item.id)}
+                          onDrop={(e) => handleDropOnItem(e, item.id)}
                           onDragEnd={handleDragEndItem}
-                          style={{ cursor: dragId === item.id ? 'grabbing' : 'grab' }}
+                          style={{ 
+                            cursor: dragId === item.id ? 'grabbing' : 'grab',
+                            transition: dragId === item.id ? 'none' : 'all 0.2s ease'
+                          }}
                         >
                           {/* Drag Handle */}
                           <div className="absolute top-2 left-2 z-10 p-1.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-grab active:cursor-grabbing">
@@ -2775,7 +2808,12 @@ const handleShare = async () => {
                             className="absolute top-2 right-2 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
                           />
                           <div
-                            onClick={() => handleImageClick(item)}
+                            onClick={() => {
+                              // Prevent click if we just finished dragging
+                              if (!dragJustEndedRef.current) {
+                                handleImageClick(item);
+                              }
+                            }}
                             className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
                           >
                             {item.isVideo ? (
