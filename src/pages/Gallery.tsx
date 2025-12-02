@@ -1,27 +1,3 @@
-  // Drag and drop reordering for compact grid
-  const handleDragStartItem = (id: string) => setDragId(id);
-  const handleDragOverItem = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-  const handleDropOnItem = (targetId: string) => {
-    if (!dragId || dragId === targetId) return;
-    setSortBy('custom');
-    setItems((prev) => {
-      const idsInView = new Set(filteredImages.map((i) => i.id));
-      const currentOrder = filteredImages.map((i) => i.id);
-      const from = currentOrder.indexOf(dragId);
-      const to = currentOrder.indexOf(targetId);
-      if (from === -1 || to === -1) return prev;
-      const newOrder = [...currentOrder];
-      const [moved] = newOrder.splice(from, 1);
-      newOrder.splice(to, 0, moved);
-      const orderMap = new Map<string, number>();
-      newOrder.forEach((id, i) => orderMap.set(id, i));
-      return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
-    });
-    setDragId(null);
-  };
-
 import React, { useState, useEffect, Component, ErrorInfo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
@@ -58,6 +34,7 @@ import {
   FolderPlus,
   Play,
   Upload,
+  GripVertical,
 } from 'lucide-react';
 
 // -------------------- Interfaces --------------------
@@ -152,6 +129,8 @@ class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { ha
 // -------------------- Configuration --------------------
 // main POST share endpoint (your API Gateway endpoint - POST only)
 const SHARE_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/default/sharelink';
+// backend endpoint to register/access shared folder links
+const SHARE_API_ACCESS = 'https://t5g7mczss8.execute-api.eu-north-1.amazonaws.com/default/SharedLinkAccess';
 
 // If you want a default TTL for presigned links, set it here:
 const DEFAULT_EXPIRY_SECONDS = 3600;
@@ -193,6 +172,7 @@ function Gallery() {
     hasPin: boolean;
     isActive: boolean;
     items: string[];
+    sharedId?: string; // Backend sharedId for revoke/status APIs
   }>>([]);
   const [createFolderModal, setCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -216,7 +196,9 @@ function Gallery() {
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
-  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null); // For image reordering drag
+  const [dragOverId, setDragOverId] = useState<string | null>(null); // Track which item is being dragged over
+  const dragJustEndedRef = useRef(false); // Track if drag just ended to prevent click
   const [watermarkEnabled, setWatermarkEnabled] = useState(false); // Enable watermark for uploads
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('bottom-right'); // Default watermark position
   const [watermarkImage, setWatermarkImage] = useState<string | null>(null); // Watermark image (base64)
@@ -260,10 +242,7 @@ function Gallery() {
   ];
 
   // When inside a folder, show a compact, uniform thumbnail grid like Image 2
-  const currentPathDepth = currentPath.split('/').filter(Boolean).length;
-  const compactView = currentPathDepth > 0;
-  
-  console.log('Current path depth:', currentPathDepth, 'compactView:', compactView);
+  const compactView = currentPath.split('/').filter(Boolean).length > 0;
 
   // -------------------- Notifications --------------------
   const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
@@ -306,20 +285,13 @@ function Gallery() {
     setLoading(true);
     setError(null);
     try {
-      // Normalize the current path
       let prefix = currentPath;
-      console.log('Initial currentPath:', currentPath);
-      
-      // Remove leading slash if present
-      if (prefix.startsWith('/')) {
-        prefix = prefix.substring(1);
-      }
-      // Add trailing slash if not empty and doesn't end with slash
       if (prefix && !prefix.endsWith('/')) {
-        prefix = prefix + '/';
+        prefix += '/';
       }
-      
-      console.log('Processed prefix for API:', prefix);
+      if (prefix.startsWith('/')) {
+        prefix = prefix.slice(1);
+      }
 
       console.log(`Fetching gallery items with prefix: '${prefix}'`);
 
@@ -372,38 +344,10 @@ function Gallery() {
         };
       });
 
-      console.log('Raw folders from API:', data.folders);
-      
-      const mappedFolders: FolderItem[] = data.folders
-        .filter((folder: any) => {
-          const isValid = !!folder?.name?.trim();
-          if (!isValid) {
-            console.warn('Skipping invalid folder:', folder);
-          }
-          return isValid;
-        })
-        .map((folder: any) => {
-          // Ensure path is properly formatted
-          let folderPath = folder.path || '';
-          // Remove any leading slashes
-          while (folderPath.startsWith('/')) {
-            folderPath = folderPath.substring(1);
-          }
-          // Remove any trailing slashes
-          while (folderPath.endsWith('/')) {
-            folderPath = folderPath.slice(0, -1);
-          }
-          
-          const result = {
-            name: folder.name.trim(),
-            path: `/${folderPath}`
-          };
-          
-          console.log('Mapped folder:', result);
-          return result;
-        });
-        
-      console.log('Mapped folders:', mappedFolders);
+      const mappedFolders: FolderItem[] = data.folders.map((folder: any) => ({
+        name: folder.name,
+        path: `/${folder.path.replace(/\/$/, '')}`,
+      }));
 
       // Also fetch favorites folders if we're in root directory
       let favoritesFolders: FolderItem[] = [];
@@ -643,49 +587,29 @@ function Gallery() {
         throw new Error(serverErr);
       }
 
-      // Helper function to ensure URL has hostname
-      const ensureAbsoluteUrl = (url: string): string => {
-        if (!url) return url;
-        try {
-          // If it's already an absolute URL, return as is
-          new URL(url);
-          return url;
-        } catch (e) {
-          // If it's a relative URL, prepend the current origin
-          return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
-        }
-      };
-
       // Accept various shapes
       // 1) { success: true, shares: [{ prefix, token, shareUrl, expiry }, ...] }
       if (Array.isArray((data as any).shares) && (data as any).shares.length > 0) {
         const urls: string[] = (data as any).shares
           .map((s: any) => s.shareUrl || s.link || s.presigned_url || s.url)
-          .filter(Boolean)
-          .map(ensureAbsoluteUrl);
+          .filter(Boolean);
         if (urls.length > 0) return urls;
       }
 
       // 2) older shape: { links: [...] }
       if (Array.isArray((data as any).links) && (data as any).links.length > 0) {
-        const urls: string[] = (data as any).links
-          .map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url))
-          .filter(Boolean)
-          .map(ensureAbsoluteUrl);
+        const urls: string[] = (data as any).links.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
         if (urls.length) return urls;
       }
 
       // 3) single link
       if ((data as any).link && typeof (data as any).link === 'string') {
-        return [ensureAbsoluteUrl((data as any).link)];
+        return [(data as any).link];
       }
 
       // 4) top-level array
       if (Array.isArray(data)) {
-        const urls: string[] = data
-          .map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url))
-          .filter(Boolean)
-          .map(ensureAbsoluteUrl);
+        const urls: string[] = data.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
         if (urls.length) return urls;
       }
 
@@ -697,8 +621,6 @@ function Gallery() {
   };
 
   /**
-<<<<<<< Updated upstream
-=======
    * requestFolderShareLinksFromServer
    * - POSTs to SHARE_API_ACCESS with body: { action: "generate_share_link", folderName, pin? }
    * - Returns array of shareUrl strings.
@@ -740,23 +662,10 @@ function Gallery() {
           const serverErr = data.message || JSON.stringify(data);
           throw new Error(serverErr);
         }
-        // Helper function to ensure URL has hostname
-        const ensureAbsoluteUrl = (url: string): string => {
-          if (!url) return url;
-          try {
-            // If it's already an absolute URL, return as is
-            new URL(url);
-            return url;
-          } catch (e) {
-            // If it's a relative URL, prepend the current origin
-            return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
-          }
-        };
-        
         // Expected response shape includes shareUrl
         const url = (data as any).shareUrl || (data as any).link || (data as any).url;
         if (typeof url === 'string' && url.length > 0) {
-          results.push(ensureAbsoluteUrl(url));
+          results.push(url);
         } else {
           throw new Error('Unexpected folder share response: ' + JSON.stringify(data));
         }
@@ -769,11 +678,10 @@ function Gallery() {
   };
 
   /**
->>>>>>> Stashed changes
    * generateShareableLinks
    * Accepts selected IDs (either item.key or folder.path).
    * For files: tries to use item.imageUrl if present, otherwise asks server for presigned link.
-   * For folders: calls server to presign objects under prefixes.
+   * For folders: calls backend to generate shared links.
    * Returns string[] of links.
    */
   const generateShareableLinks = async (forItemIds: string[]) => {
@@ -781,12 +689,10 @@ function Gallery() {
     const itemIds = forItemIds.filter((id) => !id.startsWith('/'));
     const links: string[] = [];
 
-    // Generate share links for folders locally
-    const baseUrl = window.location.origin || 'http://localhost:5173';
-    for (const folderPath of folderPaths) {
-      const encodedPath = encodeURIComponent(folderPath);
-      const shareLink = `${baseUrl}/shared-images/${encodedPath}`;
-      links.push(shareLink);
+    // Generate share links for folders via backend
+    if (folderPaths.length > 0) {
+      const folderLinks = await requestFolderShareLinksFromServer(folderPaths, sharePin || undefined);
+      links.push(...folderLinks);
     }
 
     // Handle files
@@ -835,11 +741,156 @@ function Gallery() {
     }
   };
 
-  // Revoke/delete a share link
-  const revokeShareLink = (linkId: string) => {
-    localStorage.removeItem(`share_${linkId}`);
-    setActiveShareLinks(prev => prev.filter(link => link.id !== linkId));
-    addNotification('Share link revoked successfully', 'success');
+  // Disable (mark inactive) a share link and notify backend (best-effort)
+  const revokeShareLink = async (linkId: string) => {
+    // Call backend if we have a sharedId
+    const current = activeShareLinks.find((l) => l.id === linkId);
+    if (current?.sharedId) {
+      revokeShareLinkOnServer(current.sharedId);
+    }
+
+    // Update in React state
+    setActiveShareLinks(prev =>
+      prev.map(link =>
+        link.id === linkId ? { ...link, isActive: false } : link
+      )
+    );
+
+    // Persist inactive status in localStorage (if present)
+    try {
+      const raw = localStorage.getItem(`share_${linkId}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        data.isActive = false;
+        localStorage.setItem(`share_${linkId}`, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error('Failed to update share link status in localStorage', e);
+    }
+
+    addNotification('Share link disabled successfully', 'success');
+  };
+
+  // Call backend to revoke a share link by its sharedId
+  const revokeShareLinkOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'revoke_share_link',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to revoke share link on server';
+        console.error('revoke_share_link API error:', msg);
+        addNotification(`Server revoke failed: ${msg}`, 'error');
+      }
+    } catch (e: any) {
+      console.error('revoke_share_link API call failed:', e);
+      addNotification(
+        `Server revoke failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+    }
+  };
+
+  // Call backend to check current status of a share link
+  const getShareLinkStatusFromServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'get_share_link_status',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to get share link status from server';
+        console.error('get_share_link_status API error:', msg);
+        addNotification(`Server status check failed: ${msg}`, 'error');
+        return null;
+      }
+      return (data as any).shareLink || null;
+    } catch (e: any) {
+      console.error('get_share_link_status API call failed:', e);
+      addNotification(
+        `Server status check failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+      return null;
+    }
+  };
+
+  // Toggle active/inactive state for a share link
+  const toggleShareLinkStatus = async (linkId: string, nextActive: boolean) => {
+    const current = activeShareLinks.find((l) => l.id === linkId);
+
+    if (!current?.sharedId) {
+      console.debug('[share] toggleShareLinkStatus: no sharedId found, updating UI only');
+    } else if (!nextActive) {
+      // Disabling: call revoke API
+      console.debug(
+        '[share] Disabling link, calling revoke_share_link for sharedId:',
+        current.sharedId
+      );
+      await revokeShareLinkOnServer(current.sharedId);
+    } else {
+      // Enabling: check status on server; if still revoked, do not enable locally
+      console.debug(
+        '[share] Enabling link, checking get_share_link_status for sharedId:',
+        current.sharedId
+      );
+      const status = await getShareLinkStatusFromServer(current.sharedId);
+      if (!status || status.isActive === false) {
+        addNotification(
+          'This link is revoked or inactive on the server and cannot be re-activated.',
+          'error'
+        );
+        return;
+      }
+    }
+
+    setActiveShareLinks((prev) =>
+      prev.map((link) =>
+        link.id === linkId ? { ...link, isActive: nextActive } : link
+      )
+    );
+
+    try {
+      const raw = localStorage.getItem(`share_${linkId}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        data.isActive = nextActive;
+        localStorage.setItem(`share_${linkId}`, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error('Failed to toggle share link status in localStorage', e);
+    }
   };
 
   // Load active share links from localStorage on mount
@@ -854,6 +905,19 @@ function Gallery() {
           try {
             const data = JSON.parse(localStorage.getItem(key) || '{}');
             if (data.id && data.link) {
+              // Backfill sharedId for older entries that didn't store it
+              let sharedId = data.sharedId;
+              if (!sharedId) {
+                try {
+                  const urlObj = new URL(data.link);
+                  const parts = urlObj.pathname.split('/').filter(Boolean);
+                  sharedId = parts[parts.length - 1];
+                  data.sharedId = sharedId;
+                  localStorage.setItem(key, JSON.stringify(data));
+                } catch {
+                  sharedId = undefined;
+                }
+              }
               links.push({
                 id: data.id,
                 link: data.link,
@@ -861,6 +925,7 @@ function Gallery() {
                 hasPin: data.hasPin || false,
                 isActive: data.isActive !== false, // Default to true
                 items: data.items || [],
+                sharedId,
               });
             }
           } catch (error) {
@@ -896,6 +961,14 @@ const handleShare = async () => {
     // Create share link tracking
     const linkId = Math.random().toString(36).substr(2, 9);
     const now = Date.now();
+    let sharedId: string | undefined;
+    try {
+      const urlObj = new URL(links[0]);
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      sharedId = parts[parts.length - 1];
+    } catch {
+      sharedId = undefined;
+    }
     const newShareLink = {
       id: linkId,
       link: links[0], // Use first link as primary
@@ -903,6 +976,7 @@ const handleShare = async () => {
       hasPin: !!sharePin,
       isActive: true,
       items: selectedItems,
+      sharedId,
     };
     
     // Store in localStorage with PIN if provided
@@ -988,6 +1062,91 @@ const handleShare = async () => {
       }
     });
 
+  // -------------------- Drag and Drop Reordering Handlers --------------------
+  const handleDragStartItem = useCallback((e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+    setDragId(id);
+    dragJustEndedRef.current = false;
+  }, []);
+
+  const handleDragOverItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    
+    if (dragId && dragId !== targetId) {
+      setDragOverId(targetId);
+    }
+  }, [dragId]);
+
+  const handleDragEnterItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragId && dragId !== targetId) {
+      setDragOverId(targetId);
+    }
+  }, [dragId]);
+
+  const handleDragLeaveItem = useCallback((e: React.DragEvent) => {
+    // Only clear if we're actually leaving the element (not just moving to a child)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOverId(null);
+    }
+  }, []);
+
+  const handleDropOnItem = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      setDragOverId(null);
+      return;
+    }
+    
+    setSortBy('custom');
+    setItems((prev) => {
+      const idsInView = new Set(filteredImages.map((i) => i.id));
+      const currentOrder = filteredImages.map((i) => i.id);
+      const from = currentOrder.indexOf(dragId);
+      const to = currentOrder.indexOf(targetId);
+      
+      if (from === -1 || to === -1) {
+        setDragId(null);
+        setDragOverId(null);
+        return prev;
+      }
+      
+      const newOrder = [...currentOrder];
+      const [moved] = newOrder.splice(from, 1);
+      newOrder.splice(to, 0, moved);
+      
+      const orderMap = new Map<string, number>();
+      newOrder.forEach((id, i) => orderMap.set(id, i));
+      
+      return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
+    });
+    
+    setDragId(null);
+    setDragOverId(null);
+    addNotification('Image order updated', 'success');
+  }, [dragId, filteredImages, setSortBy, addNotification]);
+
+  const handleDragEndItem = useCallback(() => {
+    setDragId(null);
+    setDragOverId(null);
+    dragJustEndedRef.current = true;
+    // Reset after a short delay to allow click events
+    setTimeout(() => {
+      dragJustEndedRef.current = false;
+    }, 100);
+  }, []);
+
   // -------------------- Breadcrumbs --------------------
   const getBreadcrumbs = () => {
     const parts = currentPath.split('/').filter(Boolean);
@@ -996,13 +1155,9 @@ const handleShare = async () => {
     let currentBreadcrumbPath = '';
     parts.forEach((part) => {
       currentBreadcrumbPath += `/${part}`;
-      breadcrumbs.push({ 
-        name: part.charAt(0).toUpperCase() + part.slice(1), // Capitalize first letter
-        path: currentBreadcrumbPath 
-      });
+      breadcrumbs.push({ name: part, path: currentBreadcrumbPath });
     });
 
-    console.log('Breadcrumbs:', breadcrumbs);
     return breadcrumbs;
   };
 
@@ -1012,21 +1167,7 @@ const handleShare = async () => {
   };
 
   const handleFolderClick = (path: string) => {
-    console.log('Folder clicked, path:', path);
-    
-    // Clean up the path
-    let cleanPath = path;
-    // Remove any leading slashes
-    while (cleanPath.startsWith('/')) {
-      cleanPath = cleanPath.substring(1);
-    }
-    // Remove any trailing slashes
-    while (cleanPath.endsWith('/')) {
-      cleanPath = cleanPath.slice(0, -1);
-    }
-    
-    console.log('Navigating to folder:', `/gallery/${cleanPath}`);
-    navigate(`/gallery/${cleanPath}`);
+    navigate(`/gallery${path}`);
   };
 
   const handleBack = () => {
@@ -2573,8 +2714,8 @@ const handleShare = async () => {
                           : 'space-y-4'
                       }`}
                     >
-                      {/* Folders - Always show folders, regardless of compactView */}
-                      {folders.map((folder) => (
+                      {/* Folders */}
+                      {!compactView && folders.map((folder) => (
                         <div
                           key={folder.path}
                           className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${
@@ -2627,12 +2768,16 @@ const handleShare = async () => {
                         </div>
                       ))}
 
-                      {/* Images/Videos - Show after folders */}
+                      {/* Images/Videos */}
                       {filteredImages.map((item) => (
                         <div
                           key={item.id}
                           className={`group relative ${
                             selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
+                          } ${
+                            dragId === item.id ? 'opacity-50 scale-95 cursor-grabbing z-50 shadow-2xl' : ''
+                          } ${
+                            dragOverId === item.id && dragId !== item.id ? 'ring-2 ring-blue-400 ring-offset-2 scale-105 bg-blue-50/50 z-40' : ''
                           } ${
                             compactView && viewMode === 'grid'
                               ? 'rounded-lg overflow-hidden break-inside-avoid inline-block w-full mb-3'
@@ -2640,11 +2785,22 @@ const handleShare = async () => {
                                   ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
                                   : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
-                          draggable={compactView && viewMode === 'grid'}
-                          onDragStart={() => handleDragStartItem(item.id)}
-                          onDragOver={handleDragOverItem}
-                          onDrop={() => handleDropOnItem(item.id)}
+                          draggable={true}
+                          onDragStart={(e) => handleDragStartItem(e, item.id)}
+                          onDragEnter={(e) => handleDragEnterItem(e, item.id)}
+                          onDragOver={(e) => handleDragOverItem(e, item.id)}
+                          onDragLeave={handleDragLeaveItem}
+                          onDrop={(e) => handleDropOnItem(e, item.id)}
+                          onDragEnd={handleDragEndItem}
+                          style={{ 
+                            cursor: dragId === item.id ? 'grabbing' : 'grab',
+                            transition: dragId === item.id ? 'none' : 'all 0.2s ease'
+                          }}
                         >
+                          {/* Drag Handle */}
+                          <div className="absolute top-2 left-2 z-10 p-1.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-grab active:cursor-grabbing">
+                            <GripVertical className="h-4 w-4 text-gray-500" />
+                          </div>
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(item.id)}
@@ -2652,13 +2808,19 @@ const handleShare = async () => {
                             className="absolute top-2 right-2 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
                           />
                           <div
-                            onClick={() => handleImageClick(item)}
+                            onClick={() => {
+                              // Prevent click if we just finished dragging
+                              if (!dragJustEndedRef.current) {
+                                handleImageClick(item);
+                              }
+                            }}
                             className={viewMode === 'grid' ? 'cursor-pointer' : 'cursor-pointer flex-1'}
                           >
                             {item.isVideo ? (
                               <div className="relative">
                                 <video
                                   src={item.imageUrl}
+                                  draggable={false}
                                   className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   preload="none"
                                   onError={handleImageError}
@@ -2690,6 +2852,7 @@ const handleShare = async () => {
                                 <img
                                   src={compactView && viewMode === 'grid' ? item.imageUrl : getOptimizedImageUrl(item.imageUrl, viewMode === 'grid')}
                                   alt={item.title}
+                                  draggable={false}
                                   className={compactView && viewMode === 'grid' ? 'block w-full h-auto object-contain rounded-lg' : (viewMode === 'grid' ? 'w-full h-48 object-cover rounded-t-lg' : 'w-24 h-24 object-cover rounded-lg')}
                                   onError={handleImageError}
                                   onLoad={() => handleImageLoad(item.id)}
@@ -3038,11 +3201,15 @@ const handleShare = async () => {
                                           🔒 PIN Protected
                                         </span>
                                       )}
-                                      {!shareLink.isActive && (
-                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
-                                          Revoked
-                                        </span>
-                                      )}
+                                      <span
+                                        className={`px-2 py-0.5 text-xs rounded-full ${
+                                          shareLink.isActive
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-gray-200 text-gray-700'
+                                        }`}
+                                      >
+                                        {shareLink.isActive ? 'Active' : 'Inactive'}
+                                      </span>
                                     </div>
                                     <p className="text-xs text-gray-500">
                                       Created: {new Date(shareLink.createdAt).toLocaleString()}
@@ -3052,6 +3219,16 @@ const handleShare = async () => {
                                     </p>
                                   </div>
                                   <div className="flex items-center space-x-1 ml-2">
+                                    <button
+                                      onClick={() => toggleShareLinkStatus(shareLink.id, !shareLink.isActive)}
+                                      className={`px-2 py-1 text-xs rounded border ${
+                                        shareLink.isActive
+                                          ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                          : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                                      }`}
+                                    >
+                                      {shareLink.isActive ? 'Disable' : 'Enable'}
+                                    </button>
                                     <button
                                       onClick={() => copyToClipboard(shareLink.link)}
                                       className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -3150,8 +3327,8 @@ const handleShare = async () => {
 
           {/* Upload Modal */}
           {uploadModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-8">
-              <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8 max-h-[90vh] flex flex-col">
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-xl font-bold text-[#2D2D2D]">Upload Files</h3>
                   <button
@@ -3163,7 +3340,7 @@ const handleShare = async () => {
                 </div>
 
                 {/* Watermark Settings in Modal */}
-                <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200 overflow-y-auto flex-grow">
+                <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
                   <h4 className="text-sm font-semibold text-gray-800 mb-3">Watermark Settings</h4>
                   
                   <div className="space-y-4">
@@ -3362,7 +3539,7 @@ const handleShare = async () => {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex justify-end space-x-3 mt-4">
+                <div className="flex justify-end space-x-3">
                   <button
                     onClick={() => setUploadModal(false)}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium"

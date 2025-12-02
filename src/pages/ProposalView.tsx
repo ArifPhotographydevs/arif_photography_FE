@@ -88,6 +88,8 @@ interface ProposalData {
   logos?: string[];
   packageItems?: PackageItem[];
   complimentaryItems?: ComplimentaryItem[];
+  albumsCount?: number;
+  albumSheets?: number;
 }
 
 interface ApiProposalItem {
@@ -151,6 +153,8 @@ interface ApiProposalItem {
     selected?: boolean;
     qty?: number;
   }>;
+  albumsCount?: number;
+  albumSheets?: number;
 }
 
 interface ApiResponse {
@@ -323,6 +327,8 @@ function ProposalView() {
           logos: Array.isArray(matched.logos) ? matched.logos : undefined,
           packageItems,
           complimentaryItems,
+          albumsCount: typeof matched.albumsCount === 'number' ? matched.albumsCount : (Number(matched.albumsCount) || undefined),
+          albumSheets: typeof matched.albumSheets === 'number' ? matched.albumSheets : (Number(matched.albumSheets) || undefined),
         };
 
         setProposal(mapped);
@@ -714,6 +720,37 @@ function ProposalView() {
               </div>
             )}
           </div>
+
+          {/* Album Information Section */}
+          {(proposal.albumsCount || proposal.albumSheets) && (
+            <div className="mb-16">
+              <h2 className="text-4xl font-bold text-gray-900 mb-6 text-left" style={{ fontFamily: 'serif' }}>
+                Album Details
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {proposal.albumsCount && (
+                  <div className="bg-gray-600 text-white p-6 rounded-lg">
+                    <div className="flex items-center mb-2">
+                      <Camera className="h-6 w-6 mr-3" />
+                      <h3 className="text-xl font-bold">Album Count</h3>
+                    </div>
+                    <p className="text-3xl font-semibold mt-2">{proposal.albumsCount}</p>
+                    <p className="text-sm text-gray-300 mt-1">Total Albums</p>
+                  </div>
+                )}
+                {proposal.albumSheets && (
+                  <div className="bg-gray-600 text-white p-6 rounded-lg">
+                    <div className="flex items-center mb-2">
+                      <Camera className="h-6 w-6 mr-3" />
+                      <h3 className="text-xl font-bold">Album Sheets</h3>
+                    </div>
+                    <p className="text-3xl font-semibold mt-2">{proposal.albumSheets}</p>
+                    <p className="text-sm text-gray-300 mt-1">Total Sheets</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Complimentary Section */}
           {proposal.complimentaryItems && proposal.complimentaryItems.some(item => item.selected) && (

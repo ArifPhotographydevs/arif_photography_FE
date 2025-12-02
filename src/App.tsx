@@ -17,6 +17,7 @@ import Calendar from './pages/Calendar';
 import Gallery from './pages/Gallery';
 import GalleryUpload from './pages/GalleryUpload';
 import SharedImages from './pages/SharedImages';
+import SharedFolder from './pages/SharedFolder';
 import ClientGallery from './pages/ClientGallery';
 import Clients from './pages/Clients';
 import TeamManagement from './pages/TeamManagement';
@@ -58,6 +59,8 @@ function App() {
         <Route path="/client/login" element={<ClientLogin />} />
         <Route path="/leadform" element={<Leadform />} />
         <Route path="/shared-images/:folderPath" element={<SharedImages />} />
+        <Route path="/shared-folder/:sharedId" element={<SharedFolder />} />
+        <Route path="/proposals/view/:id" element={<ProposalView />} />
 
         {/* Protected Routes (require authentication) */}
         <Route
@@ -79,10 +82,6 @@ function App() {
         <Route
           path="/proposals/create/:leadId"
           element={isAuthenticated ? <ProposalCreate /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/proposals/view/:id"
-          element={isAuthenticated ? <ProposalView /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/proposals"
