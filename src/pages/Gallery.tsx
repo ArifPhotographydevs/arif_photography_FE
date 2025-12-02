@@ -260,7 +260,10 @@ function Gallery() {
   ];
 
   // When inside a folder, show a compact, uniform thumbnail grid like Image 2
-  const compactView = currentPath.split('/').filter(Boolean).length > 0;
+  const currentPathDepth = currentPath.split('/').filter(Boolean).length;
+  const compactView = currentPathDepth > 0;
+  
+  console.log('Current path depth:', currentPathDepth, 'compactView:', compactView);
 
   // -------------------- Notifications --------------------
   const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
@@ -303,13 +306,20 @@ function Gallery() {
     setLoading(true);
     setError(null);
     try {
+      // Normalize the current path
       let prefix = currentPath;
-      if (prefix && !prefix.endsWith('/')) {
-        prefix += '/';
-      }
+      console.log('Initial currentPath:', currentPath);
+      
+      // Remove leading slash if present
       if (prefix.startsWith('/')) {
-        prefix = prefix.slice(1);
+        prefix = prefix.substring(1);
       }
+      // Add trailing slash if not empty and doesn't end with slash
+      if (prefix && !prefix.endsWith('/')) {
+        prefix = prefix + '/';
+      }
+      
+      console.log('Processed prefix for API:', prefix);
 
       console.log(`Fetching gallery items with prefix: '${prefix}'`);
 
@@ -362,10 +372,38 @@ function Gallery() {
         };
       });
 
-      const mappedFolders: FolderItem[] = data.folders.map((folder: any) => ({
-        name: folder.name,
-        path: `/${folder.path.replace(/\/$/, '')}`,
-      }));
+      console.log('Raw folders from API:', data.folders);
+      
+      const mappedFolders: FolderItem[] = data.folders
+        .filter((folder: any) => {
+          const isValid = !!folder?.name?.trim();
+          if (!isValid) {
+            console.warn('Skipping invalid folder:', folder);
+          }
+          return isValid;
+        })
+        .map((folder: any) => {
+          // Ensure path is properly formatted
+          let folderPath = folder.path || '';
+          // Remove any leading slashes
+          while (folderPath.startsWith('/')) {
+            folderPath = folderPath.substring(1);
+          }
+          // Remove any trailing slashes
+          while (folderPath.endsWith('/')) {
+            folderPath = folderPath.slice(0, -1);
+          }
+          
+          const result = {
+            name: folder.name.trim(),
+            path: `/${folderPath}`
+          };
+          
+          console.log('Mapped folder:', result);
+          return result;
+        });
+        
+      console.log('Mapped folders:', mappedFolders);
 
       // Also fetch favorites folders if we're in root directory
       let favoritesFolders: FolderItem[] = [];
@@ -605,29 +643,49 @@ function Gallery() {
         throw new Error(serverErr);
       }
 
+      // Helper function to ensure URL has hostname
+      const ensureAbsoluteUrl = (url: string): string => {
+        if (!url) return url;
+        try {
+          // If it's already an absolute URL, return as is
+          new URL(url);
+          return url;
+        } catch (e) {
+          // If it's a relative URL, prepend the current origin
+          return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+        }
+      };
+
       // Accept various shapes
       // 1) { success: true, shares: [{ prefix, token, shareUrl, expiry }, ...] }
       if (Array.isArray((data as any).shares) && (data as any).shares.length > 0) {
         const urls: string[] = (data as any).shares
           .map((s: any) => s.shareUrl || s.link || s.presigned_url || s.url)
-          .filter(Boolean);
+          .filter(Boolean)
+          .map(ensureAbsoluteUrl);
         if (urls.length > 0) return urls;
       }
 
       // 2) older shape: { links: [...] }
       if (Array.isArray((data as any).links) && (data as any).links.length > 0) {
-        const urls: string[] = (data as any).links.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
+        const urls: string[] = (data as any).links
+          .map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url))
+          .filter(Boolean)
+          .map(ensureAbsoluteUrl);
         if (urls.length) return urls;
       }
 
       // 3) single link
       if ((data as any).link && typeof (data as any).link === 'string') {
-        return [(data as any).link];
+        return [ensureAbsoluteUrl((data as any).link)];
       }
 
       // 4) top-level array
       if (Array.isArray(data)) {
-        const urls: string[] = data.map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url)).filter(Boolean);
+        const urls: string[] = data
+          .map((l: any) => (typeof l === 'string' ? l : l.link || l.presigned_url || l.url))
+          .filter(Boolean)
+          .map(ensureAbsoluteUrl);
         if (urls.length) return urls;
       }
 
@@ -639,6 +697,79 @@ function Gallery() {
   };
 
   /**
+<<<<<<< Updated upstream
+=======
+   * requestFolderShareLinksFromServer
+   * - POSTs to SHARE_API_ACCESS with body: { action: "generate_share_link", folderName, pin? }
+   * - Returns array of shareUrl strings.
+   */
+  const requestFolderShareLinksFromServer = async (folders: string[], pin?: string) => {
+    try {
+      if (!Array.isArray(folders) || folders.length === 0) {
+        throw new Error('No folders provided to requestFolderShareLinksFromServer');
+      }
+      // API contract: POST { action: "generate_share_link", folderName, pin? }
+      const results: string[] = [];
+      for (const folderPath of folders) {
+        const payload: any = {
+          action: 'generate_share_link',
+          folderName: folderPath.replace(/^\//, ''), // send clean name
+        };
+        if (pin) payload.pin = pin;
+        const res = await fetch(SHARE_API_ACCESS, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+          body: JSON.stringify(payload),
+        });
+        const txt = await res.text();
+        let parsed: any = null;
+        try {
+          parsed = txt ? JSON.parse(txt) : null;
+        } catch {
+          parsed = null;
+        }
+        if (!res.ok) {
+          let serverMsg = txt;
+          if (parsed && parsed.message) serverMsg = parsed.message;
+          throw new Error(`Folder share server error: ${res.status} - ${serverMsg}`);
+        }
+        const data = parsed || (txt ? JSON.parse(txt) : null);
+        if (!data) throw new Error('Empty response from folder share server');
+        if (data.success === false) {
+          const serverErr = data.message || JSON.stringify(data);
+          throw new Error(serverErr);
+        }
+        // Helper function to ensure URL has hostname
+        const ensureAbsoluteUrl = (url: string): string => {
+          if (!url) return url;
+          try {
+            // If it's already an absolute URL, return as is
+            new URL(url);
+            return url;
+          } catch (e) {
+            // If it's a relative URL, prepend the current origin
+            return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+          }
+        };
+        
+        // Expected response shape includes shareUrl
+        const url = (data as any).shareUrl || (data as any).link || (data as any).url;
+        if (typeof url === 'string' && url.length > 0) {
+          results.push(ensureAbsoluteUrl(url));
+        } else {
+          throw new Error('Unexpected folder share response: ' + JSON.stringify(data));
+        }
+      }
+      return results;
+    } catch (err: any) {
+      console.error('requestFolderShareLinksFromServer failed:', err);
+      throw err;
+    }
+  };
+
+  /**
+>>>>>>> Stashed changes
    * generateShareableLinks
    * Accepts selected IDs (either item.key or folder.path).
    * For files: tries to use item.imageUrl if present, otherwise asks server for presigned link.
@@ -865,9 +996,13 @@ const handleShare = async () => {
     let currentBreadcrumbPath = '';
     parts.forEach((part) => {
       currentBreadcrumbPath += `/${part}`;
-      breadcrumbs.push({ name: part, path: currentBreadcrumbPath });
+      breadcrumbs.push({ 
+        name: part.charAt(0).toUpperCase() + part.slice(1), // Capitalize first letter
+        path: currentBreadcrumbPath 
+      });
     });
 
+    console.log('Breadcrumbs:', breadcrumbs);
     return breadcrumbs;
   };
 
@@ -877,7 +1012,21 @@ const handleShare = async () => {
   };
 
   const handleFolderClick = (path: string) => {
-    navigate(`/gallery${path}`);
+    console.log('Folder clicked, path:', path);
+    
+    // Clean up the path
+    let cleanPath = path;
+    // Remove any leading slashes
+    while (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.substring(1);
+    }
+    // Remove any trailing slashes
+    while (cleanPath.endsWith('/')) {
+      cleanPath = cleanPath.slice(0, -1);
+    }
+    
+    console.log('Navigating to folder:', `/gallery/${cleanPath}`);
+    navigate(`/gallery/${cleanPath}`);
   };
 
   const handleBack = () => {
@@ -2424,8 +2573,8 @@ const handleShare = async () => {
                           : 'space-y-4'
                       }`}
                     >
-                      {/* Folders */}
-                      {!compactView && folders.map((folder) => (
+                      {/* Folders - Always show folders, regardless of compactView */}
+                      {folders.map((folder) => (
                         <div
                           key={folder.path}
                           className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${
@@ -2478,7 +2627,7 @@ const handleShare = async () => {
                         </div>
                       ))}
 
-                      {/* Images/Videos */}
+                      {/* Images/Videos - Show after folders */}
                       {filteredImages.map((item) => (
                         <div
                           key={item.id}
@@ -3001,8 +3150,8 @@ const handleShare = async () => {
 
           {/* Upload Modal */}
           {uploadModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto py-8">
+              <div className="bg-white rounded-lg p-6 w-full max-w-2xl my-8 max-h-[90vh] flex flex-col">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-xl font-bold text-[#2D2D2D]">Upload Files</h3>
                   <button
@@ -3014,7 +3163,7 @@ const handleShare = async () => {
                 </div>
 
                 {/* Watermark Settings in Modal */}
-                <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200 overflow-y-auto flex-grow">
                   <h4 className="text-sm font-semibold text-gray-800 mb-3">Watermark Settings</h4>
                   
                   <div className="space-y-4">
@@ -3213,7 +3362,7 @@ const handleShare = async () => {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex justify-end space-x-3">
+                <div className="flex justify-end space-x-3 mt-4">
                   <button
                     onClick={() => setUploadModal(false)}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium"
