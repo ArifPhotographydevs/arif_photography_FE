@@ -1,6 +1,7 @@
 // @ts-ignore - React is needed for JSX runtime despite react-jsx transform
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { downloadFiles } from '../api/downloadAPI';
 import {
   ArrowLeft,
   Grid3X3,
@@ -403,38 +404,205 @@ function SharedImages() {
   };
 
   // Quick download from toolbar: download selected-for-download, else all
+  const fetchAllImages = async (prefix: string): Promise<GalleryItem[]> => {
+    try {
+      const response = await fetch(
+        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
+        {
+          method: 'GET',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          mode: 'cors',
+          credentials: 'include' // Include credentials for CORS
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server response:', errorText);
+        throw new Error(`Failed to fetch all images: ${response.status} ${response.statusText}`);
+      }
+
+      const data: ApiResponse = await response.json();
+      if (!data || !Array.isArray(data.files)) {
+        throw new Error('Unexpected API response format');
+      }
+
+      return data.files
+        .map((item: any) => {
+          if (!item.key || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
+            return null;
+          }
+          const keyParts = item.key.split('/');
+          const rawTitle = keyParts.pop() || 'Untitled';
+          const title = rawTitle.replace(/\.[^/.]+$/, '');
+          let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
+          const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
+          if (dateMatch) {
+            eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+          }
+          const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
+          const folderPath = keyParts.join('/');
+          const subfolderName = folderPath.replace(prefix, '').split('/')[0] || 'Main Folder';
+          
+          return {
+            id: item.key,
+            shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
+            eventDate,
+            imageUrl: item.presigned_url || item.url,
+            title: `${subfolderName}: ${title}`,
+            uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
+            isWatermarked: false,
+            isPinProtected: false,
+            isFavorite: false,
+            key: item.key,
+            isVideo,
+          } as GalleryItem;
+        })
+        .filter((item): item is GalleryItem => item !== null);
+    } catch (error) {
+      console.error('Error fetching all images:', error);
+      throw error;
+    }
+  };
+
   const handleQuickDownload = async () => {
-    const downloadAll = downloadSelectedItems.length === 0;
     if (!permissions.canDownload) {
       addNotification('Downloads are not permitted in this gallery', 'error');
       return;
     }
-    if (!downloadAll && downloadSelectedItems.length === 0) {
-      addNotification('No items selected for download', 'error');
-      return;
+    
+    try {
+      // Show email input dialog first
+      const email = prompt('Please enter your email to receive the download link:');
+      if (!email) {
+        addNotification('Download cancelled', 'info');
+        return;
+      }
+
+      // Validate email format
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        addNotification('Please enter a valid email address', 'error');
+        return;
+      }
+
+      setIsDownloading(true);
+      addNotification('Preparing your download, please wait...', 'info');
+      
+      // Get the current prefix for the API call
+      let prefix = decodedFolderPath;
+      if (prefix && !prefix.endsWith('/')) {
+        prefix += '/';
+      }
+      if (prefix.startsWith('/')) {
+        prefix = prefix.slice(1);
+      }
+      
+      // Fetch all images (including paginated ones)
+      addNotification('Gathering all images...', 'info');
+      const allImages = await fetchAllImages(prefix);
+      
+      if (allImages.length === 0) {
+        addNotification('No images found to download', 'info');
+        return;
+      }
+      
+      // Extract file keys from the images
+      const fileKeys = allImages.map(item => item.key).filter(Boolean) as string[];
+      
+      // Update progress
+      setDownloadProgress({ current: 1, total: 3 });
+      
+      // Call the Lambda function
+      addNotification('Creating your download package...', 'info');
+      
+      try {
+        // Call the Lambda function
+        const response = await fetch('https://lxdcf2aagf.execute-api.eu-north-1.amazonaws.com/default/downloadimage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fileKeys })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Download failed: ${error}`);
+        }
+
+        // Get the zip file as blob
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        
+        // Create download link
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `arif-photography-${new Date().toISOString().split('T')[0]}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        // Send email confirmation
+        try {
+          await sendDownloadEmail(email, allImages.length, allImages.length);
+          addNotification('Download complete! Check your email for confirmation.', 'success');
+        } catch (emailError) {
+          console.error('Failed to send email:', emailError);
+          addNotification('Download complete, but failed to send confirmation email', 'info');
+        }
+        
+      } catch (error: any) {
+        console.error('Download error:', error);
+        addNotification(`Download failed: ${error.message}`, 'error');
+      }
+    } catch (error: any) {
+      console.error('Error preparing download:', error);
+      addNotification(`Error: ${error.message}`, 'error');
+    } finally {
+      setIsDownloading(false);
     }
-    addNotification(downloadAll ? 'Starting download for all items…' : `Starting download for ${downloadSelectedItems.length} selected item(s)…`, 'info');
-    await handleDownloadSelected(downloadAll);
   };
 
-  // Blob save only (no preview/new tab)
+  // Download file using Lambda function to handle CORS
   const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
     try {
-      const res = await fetch(url, { method: 'GET', mode: 'cors' });
-      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-      const blob = await res.blob();
+      // Extract the key from the URL
+      const urlObj = new URL(url);
+      const key = urlObj.pathname.replace(/^\//, ''); // Remove leading slash
+      
+      // Call our Lambda function to handle the download
+      const response = await fetch('https://lxdcf2aagf.execute-api.eu-north-1.amazonaws.com/default/downloadimage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileKeys: [key] })
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Download failed: ${error}`);
+      }
+
+      // Get the blob and create a download link
+      const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename || 'download.jpg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       window.URL.revokeObjectURL(blobUrl);
-      addNotification(`Download started for ${filename}`, 'info');
+      
       return true;
     } catch (err: any) {
-      console.error('Blob download failed', err);
+      console.error('Download error:', err);
       addNotification(`Download failed: ${err.message}`, 'error');
       return false;
     }
@@ -700,7 +868,7 @@ function SharedImages() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50">
       {/* Hero Header with Image */}
-      <header className="relative w-full h-64 sm:h-[420px] md:h-screen md:min-h-[600px] overflow-hidden">
+      <header className="relative w-full h-screen min-h-[600px] overflow-hidden flex flex-col">
         {/* Hero Image Background */}
         {heroImage ? (
           <div className="absolute inset-0">
@@ -709,7 +877,7 @@ function SharedImages() {
               alt={galleryTitle}
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent" />
           </div>
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
@@ -717,7 +885,7 @@ function SharedImages() {
           </div>
         )}
         {/* Navigation Bar */}
-        <div className="relative z-10">
+        <div className="absolute top-0 left-0 right-0 z-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16 sm:h-20">
               <div className="flex items-center space-x-4 sm:space-x-6 flex-1 min-w-0">
@@ -757,20 +925,30 @@ function SharedImages() {
             </div>
           </div>
         </div>
-        {/* Hero Content */}
-        <div className="absolute inset-0 z-10 hidden md:flex items-end justify-center pb-16 md:pb-24 lg:pb-28">
-          <div className="text-center px-4">
-            <div className="text-white/80 tracking-[0.25em] uppercase mb-4">Arif Photography</div>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white drop-shadow-lg">
+        {/* Hero Content - Positioned at bottom */}
+        <div className="relative z-10 w-full px-4 mt-auto mb-16">
+          <div className="w-full max-w-3xl mx-auto text-center">
+            <div className="text-white/80 text-xs sm:text-sm tracking-[0.15em] sm:tracking-[0.25em] uppercase mb-2 sm:mb-4">
+              Arif Photography
+            </div>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white leading-tight mb-3">
               {galleryTitle}
             </h1>
-            <p className="mt-4 text-white/90 text-sm sm:text-base font-light">
+            <p className="text-white/80 text-sm sm:text-base font-light mb-8">
               A curated collection of beautiful photography
             </p>
-            <a href="#gallery" className="inline-flex items-center justify-center mt-10 text-white/90 hover:text-white transition-colors" aria-label="Scroll to gallery">
-              <ChevronDown className="h-8 w-8 animate-bounce" />
-            </a>
           </div>
+        </div>
+        
+        {/* Scroll Indicator - Centered at bottom */}
+        <div className="relative z-10 w-full flex justify-center pb-8">
+          <a 
+            href="#gallery" 
+            className="text-white/90 hover:text-white transition-colors" 
+            aria-label="Scroll to gallery"
+          >
+            <ChevronDown className="h-8 w-8 animate-bounce" />
+          </a>
         </div>
       </header>
 
@@ -780,33 +958,15 @@ function SharedImages() {
           <div className="mb-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
-                onClick={handleFavoriteAll}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium text-gray-700"
-              >
-                <Heart className={`h-4 w-4 ${favoritedItems.length === items.length ? 'fill-red-500 text-red-500' : ''}`} />
-                <span>
-                  {favoritedItems.length === items.length ? 'Unselect All' : 'Select All'}
-                </span>
-              </button>
-              <button
-                onClick={handleDownloadSelectAll}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium text-gray-700"
-              >
-                <Download className={`h-4 w-4 ${downloadSelectedItems.length === items.length ? 'text-gray-900' : 'text-gray-500'}`} />
-                <span>
-                  {downloadSelectedItems.length === items.length ? 'Unselect All (Download)' : 'Select All for Download'}
-                </span>
-              </button>
-              <button
                 onClick={openDownloadFlow}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-sm font-medium shadow-sm"
               >
                 <Download className="h-4 w-4" />
                 <span>Download</span>
               </button>
             </div>
             <span className="text-sm text-gray-500 font-light">
-              {items.length} {items.length === 1 ? 'image' : 'images'} • Selected for download: {downloadSelectedItems.length}
+              {items.length} {items.length === 1 ? 'image' : 'images'}
             </span>
           </div>
         )}
