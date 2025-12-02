@@ -60,6 +60,7 @@ function App() {
         <Route path="/leadform" element={<Leadform />} />
         <Route path="/shared-images/:folderPath" element={<SharedImages />} />
         <Route path="/shared-folder/:sharedId" element={<SharedFolder />} />
+        <Route path="/proposals/view/:id" element={<ProposalView />} />
 
         {/* Protected Routes (require authentication) */}
         <Route
@@ -81,10 +82,6 @@ function App() {
         <Route
           path="/proposals/create/:leadId"
           element={isAuthenticated ? <ProposalCreate /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/proposals/view/:id"
-          element={isAuthenticated ? <ProposalView /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/proposals"
