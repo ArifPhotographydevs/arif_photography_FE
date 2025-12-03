@@ -750,8 +750,8 @@ function Gallery() {
     }
 
     // Update in React state
-    setActiveShareLinks(prev =>
-      prev.map(link =>
+    setActiveShareLinks((prev) =>
+      prev.map((link) =>
         link.id === linkId ? { ...link, isActive: false } : link
       )
     );
@@ -769,6 +769,28 @@ function Gallery() {
     }
 
     addNotification('Share link disabled successfully', 'success');
+  };
+
+  // Permanently delete a share link and notify backend
+  const deleteShareLink = async (linkId: string) => {
+    const current = activeShareLinks.find((l) => l.id === linkId);
+
+    // Call backend delete if we have a sharedId
+    if (current?.sharedId) {
+      await deleteShareLinkOnServer(current.sharedId);
+    }
+
+    // Remove from React state
+    setActiveShareLinks((prev) => prev.filter((link) => link.id !== linkId));
+
+    // Remove from localStorage if present
+    try {
+      localStorage.removeItem(`share_${linkId}`);
+    } catch (e) {
+      console.error('Failed to remove share link from localStorage', e);
+    }
+
+    addNotification('Share link deleted successfully', 'success');
   };
 
   // Call backend to revoke a share link by its sharedId
@@ -802,6 +824,42 @@ function Gallery() {
       console.error('revoke_share_link API call failed:', e);
       addNotification(
         `Server revoke failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+    }
+  };
+
+  // Call backend to permanently delete a share link by its sharedId
+  const deleteShareLinkOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'delete_share_link',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to delete share link on server';
+        console.error('delete_share_link API error:', msg);
+        addNotification(`Server delete failed: ${msg}`, 'error');
+      }
+    } catch (e: any) {
+      console.error('delete_share_link API call failed:', e);
+      addNotification(
+        `Server delete failed: ${e.message || 'Unexpected error'}`,
         'error'
       );
     }
@@ -3237,9 +3295,9 @@ const handleShare = async () => {
                                       <Copy className="w-3.5 h-3.5" />
                                     </button>
                                     <button
-                                      onClick={() => revokeShareLink(shareLink.id)}
+                                      onClick={() => deleteShareLink(shareLink.id)}
                                       className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
-                                      title="Revoke access"
+                                      title="Delete link"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
