@@ -27,6 +27,9 @@ import {
 } from 'lucide-react';
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
+// API endpoint for share link access
+const SHARE_API_ACCESS = 'https://t5g7mczss8.execute-api.eu-north-1.amazonaws.com/default/SharedLinkAccess';
+
 // -------------------- Interfaces --------------------
 interface GalleryItem {
   id: string;
@@ -92,64 +95,135 @@ function SharedImages() {
   // Hero Image
   const [heroImage, setHeroImage] = useState<string | null>(null);
 
-  // PIN Protection
+  // PIN Protection & Access Control
   const [isPinRequired, setIsPinRequired] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+  const [isAccessDenied, setIsAccessDenied] = useState(false);
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
+  const [hasAccess, setHasAccess] = useState(false);
 
   // Decode the folder path from URL
   const decodedFolderPath = folderPath ? decodeURIComponent(folderPath) : '';
 
-  // Check PIN protection on mount
+  // Check share link status and PIN requirement on mount
   useEffect(() => {
-    if (shareId) {
-      const shareData = localStorage.getItem(`share_${shareId}`);
-      if (shareData) {
-        try {
-          const data = JSON.parse(shareData);
-
-          // Check if link is active
-          if (data.isActive === false) {
-            setError('This share link has been revoked by the owner.');
-            setLoading(false);
-            return;
-          }
-
-          // Check if PIN is required
-          if (data.pin) {
-            setIsPinRequired(true);
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error('Failed to parse share data:', err);
-        }
+    const checkShareLinkAccess = async () => {
+      if (!shareId) {
+        setIsCheckingAccess(false);
+        setHasAccess(true); // Allow access if no shareId (direct access)
+        return;
       }
-    }
+
+      setIsCheckingAccess(true);
+      try {
+        // Check share link status from server
+        const res = await fetch(SHARE_API_ACCESS, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+          body: JSON.stringify({
+            action: 'get_share_link_status',
+            sharedId: shareId,
+          }),
+        });
+
+        const txt = await res.text();
+        let data: any = null;
+        try {
+          data = txt ? JSON.parse(txt) : null;
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok || !data || data.success === false) {
+          // Access denied
+          setIsAccessDenied(true);
+          setIsCheckingAccess(false);
+          setLoading(false);
+          return;
+        }
+
+        const link = (data as any).shareLink;
+        if (!link || link.isActive === false) {
+          // Link is inactive/revoked
+          setIsAccessDenied(true);
+          setIsCheckingAccess(false);
+          setLoading(false);
+          return;
+        }
+
+        // Check if PIN is required
+        if (link.pin || link.isPinProtected) {
+          setIsPinRequired(true);
+          setIsCheckingAccess(false);
+          setLoading(false);
+        } else {
+          // No PIN required, grant access
+          setHasAccess(true);
+          setIsCheckingAccess(false);
+        }
+      } catch (err: any) {
+        console.error('Failed to check share link access:', err);
+        setIsAccessDenied(true);
+        setIsCheckingAccess(false);
+        setLoading(false);
+      }
+    };
+
+    checkShareLinkAccess();
   }, [shareId]);
 
-  // Verify PIN
-  const handlePinSubmit = () => {
-    if (!shareId) return;
+  // Verify PIN with server
+  const handlePinSubmit = async () => {
+    if (!shareId || !pinInput || isVerifyingPin) return;
 
-    const shareData = localStorage.getItem(`share_${shareId}`);
-    if (shareData) {
+    setPinError('');
+    setIsVerifyingPin(true);
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'verify_pin',
+          sharedId: shareId,
+          pin: pinInput,
+        }),
+      });
+
+      const txt = await res.text();
+      let data: any = null;
       try {
-        const data = JSON.parse(shareData);
-        if (data.pin === pinInput) {
-          setIsPinRequired(false);
-          setPinError('');
-          addNotification('Access granted', 'success');
-          // Trigger fetch after PIN verification
-          if (decodedFolderPath) {
-            fetchFolderItems();
-          }
-        } else {
-          setPinError('Incorrect PIN. Please try again.');
-          setPinInput('');
-        }
-      } catch (err) {
-        setPinError('Failed to verify PIN');
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
       }
+
+      if (!res.ok || !data || data.success === false) {
+        const msg = (data && data.message) ? data.message : 'Incorrect PIN. Please try again.';
+        setPinError(msg);
+        setPinInput('');
+        setIsVerifyingPin(false);
+        return;
+      }
+
+      // PIN verified successfully
+      setIsPinRequired(false);
+      setPinError('');
+      setHasAccess(true);
+      setIsVerifyingPin(false);
+      addNotification('Access granted', 'success');
+      
+      // Trigger fetch after PIN verification
+      if (decodedFolderPath) {
+        fetchFolderItems();
+      }
+    } catch (err: any) {
+      setPinError('Failed to verify PIN. Please try again.');
+      setPinInput('');
+      setIsVerifyingPin(false);
     }
   };
 
@@ -261,9 +335,12 @@ function SharedImages() {
   }, [decodedFolderPath]);
 
   useEffect(() => {
-    fetchFolderItems();
-    setCurrentPage(1);
-  }, [fetchFolderItems]);
+    // Only fetch folder items if we have access and are not checking access
+    if (hasAccess && !isCheckingAccess && !isPinRequired && !isAccessDenied) {
+      fetchFolderItems();
+      setCurrentPage(1);
+    }
+  }, [hasAccess, isCheckingAccess, isPinRequired, isAccessDenied, fetchFolderItems]);
 
   // Preload initial images and warm Cache API for same-origin only (silent, no UI state)
   useEffect(() => {
@@ -761,6 +838,43 @@ function SharedImages() {
     setCurrentPage(1);
   }, [items.length]);
 
+  // Access Denied Popup
+  if (isAccessDenied) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md border border-amber-100">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-red-50 rounded-full mb-6">
+              <AlertCircle className="h-10 w-10 text-red-500" />
+            </div>
+            <h2 className="text-3xl font-light text-gray-900 mb-3 tracking-tight">Access Denied</h2>
+            <p className="text-gray-600 text-base leading-relaxed">
+              You don't have the access to this shared folder. The link may have been revoked or expired.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/')}
+            className="w-full py-3 px-6 bg-amber-900 text-white rounded-xl hover:bg-amber-800 transition-colors font-medium"
+          >
+            Go to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state while checking access
+  if (isCheckingAccess) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-stone-50 to-amber-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-amber-600" />
+          <p className="text-amber-700 font-light">Checking access permissions...</p>
+        </div>
+      </div>
+    );
+  }
+
   // PIN Protection Modal
   if (isPinRequired) {
     return (
@@ -770,8 +884,8 @@ function SharedImages() {
             <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-amber-100 to-amber-200 rounded-full mb-6">
               <Lock className="h-10 w-10 text-amber-700" />
             </div>
-            <h2 className="text-3xl font-light text-gray-900 mb-3 tracking-tight">Download Pin Required</h2>
-            <p className="text-gray-600 text-base leading-relaxed">Images in this gallery require a PIN for download. Enter your PIN below</p>
+            <h2 className="text-3xl font-light text-gray-900 mb-3 tracking-tight">PIN Required</h2>
+            <p className="text-gray-600 text-base leading-relaxed">This shared folder is protected. Enter the PIN provided to you to continue.</p>
           </div>
 
           <div className="space-y-6">
@@ -780,10 +894,11 @@ function SharedImages() {
                 type="text"
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handlePinSubmit()}
+                onKeyPress={(e) => e.key === 'Enter' && !isVerifyingPin && handlePinSubmit()}
                 placeholder="Enter PIN"
                 maxLength={6}
-                className="w-full px-6 py-4 border-2 border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-2xl tracking-[0.3em] font-light text-gray-900 placeholder-amber-400 transition-all"
+                disabled={isVerifyingPin}
+                className="w-full px-6 py-4 border-2 border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-2xl tracking-[0.3em] font-light text-gray-900 placeholder-amber-400 transition-all disabled:opacity-50"
                 autoFocus
               />
               {pinError && (
@@ -796,17 +911,25 @@ function SharedImages() {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setIsPinRequired(false)}
-                className="flex-1 py-3 px-6 bg-amber-100 text-amber-700 rounded-xl hover:bg-amber-200 transition-colors font-medium"
+                onClick={() => navigate('/')}
+                disabled={isVerifyingPin}
+                className="flex-1 py-3 px-6 bg-amber-100 text-amber-700 rounded-xl hover:bg-amber-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePinSubmit}
-                disabled={!pinInput}
-                className="flex-1 py-3 px-6 bg-amber-900 text-white rounded-xl hover:bg-amber-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!pinInput || isVerifyingPin}
+                className="flex-1 py-3 px-6 bg-amber-900 text-white rounded-xl hover:bg-amber-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center"
               >
-                Submit
+                {isVerifyingPin ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Submit'
+                )}
               </button>
             </div>
           </div>

@@ -829,6 +829,45 @@ function Gallery() {
     }
   };
 
+  // Call backend to re-grant access (enable) a share link by its sharedId
+  const grantShareLinkAccessOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'grant_share_link_access',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to enable share link on server';
+        console.error('grant_share_link_access API error:', msg);
+        addNotification(`Server enable failed: ${msg}`, 'error');
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.error('grant_share_link_access API call failed:', e);
+      addNotification(
+        `Server enable failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+      return false;
+    }
+  };
+
   // Call backend to permanently delete a share link by its sharedId
   const deleteShareLinkOnServer = async (sharedId: string) => {
     try {
@@ -918,17 +957,14 @@ function Gallery() {
       );
       await revokeShareLinkOnServer(current.sharedId);
     } else {
-      // Enabling: check status on server; if still revoked, do not enable locally
+      // Enabling: call grant_share_link_access so backend marks it active again
       console.debug(
-        '[share] Enabling link, checking get_share_link_status for sharedId:',
+        '[share] Enabling link, calling grant_share_link_access for sharedId:',
         current.sharedId
       );
-      const status = await getShareLinkStatusFromServer(current.sharedId);
-      if (!status || status.isActive === false) {
-        addNotification(
-          'This link is revoked or inactive on the server and cannot be re-activated.',
-          'error'
-        );
+      const ok = await grantShareLinkAccessOnServer(current.sharedId);
+      if (!ok) {
+        // Do not flip UI/localStorage if server failed
         return;
       }
     }
