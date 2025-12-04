@@ -644,155 +644,44 @@ function SharedImages() {
     }
   };
 
-  // Download file using fetch and createObjectURL
-  const downloadImage = async (url: string, filename: string): Promise<boolean> => {
+  // Download file using Lambda function to handle CORS
+  const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
     try {
-      // Fetch the file
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        cache: 'no-cache',
-        credentials: 'same-origin',
+      // Extract the key from the URL
+      const urlObj = new URL(url);
+      const key = urlObj.pathname.replace(/^\//, ''); // Remove leading slash
+      
+      // Call our Lambda function to handle the download
+      const response = await fetch('https://lxdcf2aagf.execute-api.eu-north-1.amazonaws.com/default/downloadimage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileKeys: [key] })
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+        const error = await response.text();
+        throw new Error(`Download failed: ${error}`);
       }
 
-      // Get the file as a blob
+      // Get the blob and create a download link
       const blob = await response.blob();
-      
-      // Create a blob URL
       const blobUrl = window.URL.createObjectURL(blob);
       
-      // Create a hidden iframe for the download
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-      
-      // Set iframe content to a page that triggers the download
-      iframe.srcdoc = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <script>
-              // This script runs inside the iframe
-              window.onload = function() {
-                const a = document.createElement('a');
-                a.href = '${blobUrl}';
-                a.download = '${filename || 'download.jpg'}';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => window.parent.postMessage('downloadComplete', '*'), 100);
-              };
-            </script>
-          </head>
-          <body></body>
-        </html>
-      `;
-      
-      // Clean up after download starts
-      const cleanup = () => {
-        try {
-          window.URL.revokeObjectURL(blobUrl);
-          // Check if iframe is still in the document before trying to remove it
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        } catch (error) {
-          console.warn('Cleanup error:', error);
-        }
-      };
-      
-      // Set up message listener for cleanup
-      const messageHandler = (e: MessageEvent) => {
-        if (e.data === 'downloadComplete') {
-          cleanup();
-          window.removeEventListener('message', messageHandler);
-        }
-      };
-      
-      window.addEventListener('message', messageHandler);
-      
-      // Set timeout as fallback cleanup
-      const cleanupTimer = setTimeout(() => {
-        cleanup();
-        window.removeEventListener('message', messageHandler);
-      }, 5000);
-      
-      // Clean up the timeout when component unmounts
-      return () => {
-        clearTimeout(cleanupTimer);
-        window.removeEventListener('message', messageHandler);
-        cleanup();
-      };
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename || 'download.jpg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
       
       return true;
-  } catch (error: any) {
-    console.error('Download error:', error);
-    addNotification(`Download failed: ${error.message}`, 'error');
-    return false;
-  }
-};
-  // Helper function to fetch with local Vite proxy
-  const fetchWithCorsProxy = async (url: string) => {
-    try {
-      // Remove any existing proxy prefix if present
-      const cleanUrl = url.replace(/^\/api\/proxy/, '');
-      
-      // Create a URL object to parse the URL
-      let urlObj: URL;
-      try {
-        urlObj = new URL(cleanUrl);
-      } catch (e) {
-        // If URL is relative, prepend the origin
-        urlObj = new URL(cleanUrl, window.location.origin);
-      }
-      
-      // Create the proxy URL
-      const proxyUrl = `/api/proxy${urlObj.pathname}${urlObj.search}`;
-      
-      console.log('Fetching through proxy:', proxyUrl);
-      
-      const response = await fetch(proxyUrl, {
-        headers: {
-          // Add any necessary headers here
-        },
-        mode: 'cors',
-        credentials: 'omit',
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Proxy fetch error:', {
-          status: response.status,
-          statusText: response.statusText,
-          url: proxyUrl,
-          error: errorText
-        });
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.blob();
-    } catch (error) {
-      console.error('Proxy fetch failed, trying direct fetch:', error);
-      
-      // Fallback to direct fetch if proxy fails
-      try {
-        const response = await fetch(url, {
-          mode: 'cors',
-          credentials: 'omit',
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Direct fetch failed: ${response.status} ${response.statusText}`);
-        }
-        
-        return await response.blob();
-      } catch (directError: any) {
-        console.error('Direct fetch also failed:', directError);
-        throw new Error(`Failed to fetch image: ${directError.message || 'Unknown error'}`);
-      }
+    } catch (err: any) {
+      console.error('Download error:', err);
+      addNotification(`Download failed: ${err.message}`, 'error');
+      return false;
     }
   };
 
@@ -807,105 +696,25 @@ function SharedImages() {
         : (downloadSelectedItems.length > 0
             ? items.filter(item => downloadSelectedItems.includes(item.id))
             : []);
-      
       if (itemsToDownload.length === 0) {
         addNotification('No items selected for download', 'error');
         return 0;
       }
-
       setIsDownloading(true);
       setDownloadProgress({ current: 0, total: itemsToDownload.length });
       let successCount = 0;
-
-      // If more than 10 items, create a ZIP file
-      if (itemsToDownload.length > 10) {
-        try {
-          const JSZip = (await import('jszip')).default;
-          const zip = new JSZip();
-          const folder = zip.folder('arif_photography_downloads') || zip;
-          
-          // Add each file to the ZIP
-          for (let i = 0; i < itemsToDownload.length; i++) {
-            const item = itemsToDownload[i];
-            try {
-              // Use CORS proxy to fetch the image
-              const blob = await fetchWithCorsProxy(item.imageUrl);
-              const ext = item.isVideo ? 'mp4' : item.imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
-              const filename = `${item.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${ext}`;
-              
-              folder.file(filename, blob);
-              
-              // Update progress
-              setDownloadProgress(prev => ({
-                current: i + 1,
-                total: itemsToDownload.length
-              }));
-              
-              successCount++;
-            } catch (error) {
-              console.error(`Error processing ${item.title}:`, error);
-              // Continue with next file even if one fails
-            }
-          }
-          
-          // Generate and download the ZIP file
-          addNotification('Creating ZIP file, please wait...', 'info');
-          const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
-            setDownloadProgress(prev => ({
-              current: Math.round((metadata.percent / 100) * itemsToDownload.length),
-              total: itemsToDownload.length
-            }));
-          });
-          
-          const url = window.URL.createObjectURL(content);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `arif_photography_${new Date().toISOString().split('T')[0]}.zip`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-          
-          addNotification(`Successfully downloaded ${successCount} items in a ZIP file`, 'success');
-          return successCount;
-        } catch (error: any) {
-          console.error('Error creating ZIP:', error);
-          addNotification('Failed to create ZIP file. Falling back to individual downloads.', 'error');
-          // Fall through to individual downloads
-        }
-      }
-
-      // If ZIP creation failed or <= 10 items, download individually
       for (let i = 0; i < itemsToDownload.length; i++) {
         const item = itemsToDownload[i];
-        try {
-          const ext = item.isVideo ? 'mp4' : item.imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
-          const filename = `${item.title}.${ext}`;
-          
-          // Add a small delay between downloads to prevent browser blocking
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 300));
-          }
-          
-          const success = await downloadImage(item.imageUrl, filename);
-          if (success) successCount++;
-          
-          // Update progress
-          setDownloadProgress(prev => ({
-            current: i + 1,
-            total: itemsToDownload.length
-          }));
-        } catch (error) {
-          console.error(`Error downloading ${item.title}:`, error);
-        }
+        const ext = item.isVideo ? 'mp4' : 'jpg';
+        const filename = `${item.title}.${ext}`;
+        const success = await fetchBlobOrDownloadLink(item.imageUrl, filename);
+        if (success) successCount++;
+        setDownloadProgress({ current: i + 1, total: itemsToDownload.length });
+        // Small delay to prevent browser blocking multiple downloads
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
-      if (successCount > 0) {
-        addNotification(`Downloaded ${successCount} of ${itemsToDownload.length} items`, 'success');
-      } else {
-        addNotification('Failed to download any items', 'error');
-      }
-      
+      setIsDownloading(false);
+      addNotification(`Downloaded ${successCount} of ${itemsToDownload.length} items`, 'success');
       return successCount;
     } catch (err: any) {
       setIsDownloading(false);
@@ -1203,18 +1012,14 @@ function SharedImages() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16 sm:h-20">
               <div className="flex items-center space-x-4 sm:space-x-6 flex-1 min-w-0">
-                <div className="flex items-center space-x-4">
-                  <button
-                    onClick={handleBackToGallery}
-                    className="flex items-center space-x-2 text-white/90 hover:text-white transition-colors group"
-                    aria-label="Go back"
-                  >
-                    <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
-                    <span className="text-sm font-medium hidden sm:inline">Home</span>
-                  </button>
-                  <div className="hidden md:block h-6 w-px bg-white/20" />
-                  <h1 className="text-lg font-light text-white hidden md:block">Arif Photography</h1>
-                </div>
+                <button
+                  onClick={handleBackToGallery}
+                  className="flex items-center space-x-2 text-white/90 hover:text-white transition-colors group"
+                  aria-label="Go back"
+                >
+                  <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
+                  <span className="text-sm font-medium hidden sm:inline">Home</span>
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1329,7 +1134,7 @@ function SharedImages() {
                   key={item.id}
                   className={`group relative bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100/50 ${
                     favoritedItems.includes(item.id) ? 'ring-2 ring-red-500 ring-offset-2' : ''
-                  } ${viewMode === 'list' ? 'flex items-center gap-3 p-3 sm:gap-4 sm:p-4' : 'mb-4 sm:mb-6 break-inside-avoid'}`}
+                  } ${downloadSelectedItems.includes(item.id) ? 'ring-2 ring-indigo-500 ring-offset-2' : ''} ${viewMode === 'list' ? 'flex items-center gap-3 p-3 sm:gap-4 sm:p-4' : 'mb-4 sm:mb-6 break-inside-avoid'}`}
                   style={{ contentVisibility: 'auto' }}
                 >
                   <button
@@ -1345,6 +1150,20 @@ function SharedImages() {
                     aria-label={favoritedItems.includes(item.id) ? 'Remove from favorites' : 'Add to favorites'}
                   >
                     <Heart className="h-4 w-4" fill={favoritedItems.includes(item.id) ? 'currentColor' : 'none'} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleDownloadSelect(item.id);
+                    }}
+                    className={`absolute top-3 left-3 z-10 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:scale-110 ${
+                      downloadSelectedItems.includes(item.id)
+                        ? 'bg-indigo-600/90 text-white shadow-lg'
+                        : 'bg-white/90 text-gray-500 hover:text-indigo-600 hover:bg-white shadow-sm'
+                    }`}
+                    aria-label={downloadSelectedItems.includes(item.id) ? 'Unselect for download' : 'Select for download'}
+                  >
+                    <Check className="h-4 w-4" />
                   </button>
                   <div
                     className={`relative ${viewMode === 'list' ? 'w-32 h-20 flex-shrink-0 rounded-lg overflow-hidden' : ''}`}
@@ -1381,105 +1200,34 @@ function SharedImages() {
               ))}
             </div>
             {totalPages > 1 && (
-              <div className="flex justify-center mt-8 px-4">
-                <nav className="flex flex-wrap items-center justify-center gap-1 sm:gap-2">
-                  {/* Previous Button */}
+              <div className="mt-12 flex justify-center items-center gap-2">
+                <button
+                  onClick={() => paginate(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="h-5 w-5 text-gray-600" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => (
                   <button
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 sm:py-2 text-sm sm:text-base rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                    key={i}
+                    onClick={() => paginate(i + 1)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      currentPage === i + 1
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-white border border-gray-200 hover:bg-gray-50 text-gray-700'
+                    }`}
                   >
-                    <ChevronLeft className="h-4 w-4" />
-                    <span className="hidden sm:inline">Previous</span>
+                    {i + 1}
                   </button>
-                  
-                  {/* First Page */}
-                  {currentPage > 3 && (
-                    <>
-                      <button
-                        onClick={() => setCurrentPage(1)}
-                        className={`px-3 py-1.5 sm:py-2 text-sm sm:text-base rounded-md ${
-                          1 === currentPage
-                            ? 'bg-gray-900 text-white'
-                            : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        1
-                      </button>
-                      {currentPage > 4 && <span className="px-2 text-gray-500">...</span>}
-                    </>
-                  )}
-                  
-                  {/* Page Numbers */}
-                  {Array.from(
-                    { 
-                      length: Math.min(5, Math.ceil(items.length / itemsPerPage)) 
-                    }, 
-                    (_, i) => {
-                      let pageNum;
-                      if (currentPage <= 3) {
-                        pageNum = i + 1;
-                      } else if (currentPage >= Math.ceil(items.length / itemsPerPage) - 2) {
-                        pageNum = Math.ceil(items.length / itemsPerPage) - 4 + i;
-                      } else {
-                        pageNum = currentPage - 2 + i;
-                      }
-                      
-                      if (pageNum > 0 && pageNum <= Math.ceil(items.length / itemsPerPage)) {
-                        return (
-                          <button
-                            key={pageNum}
-                            onClick={() => setCurrentPage(pageNum)}
-                            className={`min-w-[36px] sm:min-w-[44px] px-2 py-1.5 sm:py-2 text-sm sm:text-base rounded-md ${
-                              pageNum === currentPage
-                                ? 'bg-gray-900 text-white'
-                                : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      }
-                      return null;
-                    }
-                  )}
-                  
-                  {/* Last Page */}
-                  {currentPage < Math.ceil(items.length / itemsPerPage) - 2 && (
-                    <>
-                      {currentPage < Math.ceil(items.length / itemsPerPage) - 3 && (
-                        <span className="px-2 text-gray-500">...</span>
-                      )}
-                      <button
-                        onClick={() => setCurrentPage(Math.ceil(items.length / itemsPerPage))}
-                        className={`px-3 py-1.5 sm:py-2 text-sm sm:text-base rounded-md ${
-                          Math.ceil(items.length / itemsPerPage) === currentPage
-                            ? 'bg-gray-900 text-white'
-                            : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        {Math.ceil(items.length / itemsPerPage)}
-                      </button>
-                    </>
-                  )}
-                  
-                  {/* Next Button */}
-                  <button
-                    onClick={() =>
-                      setCurrentPage(prev => Math.min(prev + 1, Math.ceil(items.length / itemsPerPage)))
-                    }
-                    disabled={currentPage === Math.ceil(items.length / itemsPerPage)}
-                    className="px-3 py-1.5 sm:py-2 text-sm sm:text-base rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                  >
-                    <span className="hidden sm:inline">Next</span>
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </nav>
-                
-                {/* Mobile Page Info */}
-                <div className="mt-2 text-center sm:hidden text-sm text-gray-600">
-                  Page {currentPage} of {Math.ceil(items.length / itemsPerPage)}
-                </div>
+                ))}
+                <button
+                  onClick={() => paginate(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="h-5 w-5 text-gray-600" />
+                </button>
               </div>
             )}
           </div>
@@ -1522,194 +1270,117 @@ function SharedImages() {
         </div>
       )}
       {/* Preloading runs silently without UI */}
-      {/* Enhanced Download Flow Modal */}
+      {/* Download Flow Modal */}
       {isDownloadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden transform transition-all duration-300 ease-in-out">
-            {/* Header */}
-            <div className="bg-gray-900 text-white p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">
-                  {downloadStep === 1 ? 'Download Options' : 'Download Ready'}
-                </h2>
-                <button 
-                  onClick={() => {
-                    setIsDownloadModalOpen(false);
-                    setDownloadStep(1);
-                    setEmailInput('');
-                  }}
-                  className="text-gray-300 hover:text-white transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 relative">
+            <div className="flex items-center justify-center mb-4">
+              <Download className="h-8 w-8 text-gray-700" />
             </div>
-            
-            {/* Progress Bar */}
-            {isModalProcessing && (
-              <div className="h-1 bg-gray-100">
-                <div 
-                  className="h-full bg-blue-600 transition-all duration-300 ease-out"
-                  style={{
-                    width: `${(downloadProgress.current / downloadProgress.total) * 100}%`,
-                    transition: 'width 0.3s ease-out'
-                  }}
+            {downloadStep === 1 && (
+              <div>
+                <h3 className="text-xl font-medium text-gray-900 text-center">Download Photos</h3>
+                <label className="block text-xs font-semibold text-gray-700 mt-6 mb-2 uppercase tracking-wider">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e)=>setEmailInput(e.target.value)}
+                  placeholder="janedoe@gmail.com"
+                  className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-800"
                 />
+                <div className="mt-6 flex items-center justify-end gap-3">
+                  <button onClick={()=>setIsDownloadModalOpen(false)} className="px-4 py-2 rounded-lg border">Cancel</button>
+                  <button
+                    onClick={()=>setDownloadStep(3)}
+                    disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)}
+                    className="px-5 py-2 rounded-lg bg-gray-900 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >Next</button>
+                </div>
               </div>
             )}
-            
-            <div className="p-6">
-              {downloadStep === 1 ? (
-                <div className="space-y-6">
-                  <div className="flex items-center p-4 bg-blue-50 rounded-lg">
-                    <div className="bg-blue-100 p-3 rounded-full">
-                      <Download className="h-6 w-6 text-blue-600" />
-                    </div>
-                    <div className="ml-4">
-                      <h3 className="font-medium text-gray-900">Download {downloadSelectedItems.length || 'All'} Items</h3>
-                      <p className="text-sm text-gray-500">
-                        {downloadSelectedItems.length > 10 ? 
-                         'Your files will be downloaded as a ZIP archive.' : 
-                         'Your files will be downloaded individually.'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Email Address (Optional)
-                      </label>
-                      <p className="text-xs text-gray-500 mb-2">
-                        We'll send you a download link to your email
-                      </p>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <input
-                          type="email"
-                          value={emailInput}
-                          onChange={(e) => setEmailInput(e.target.value)}
-                          placeholder="your.email@example.com"
-                          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="pt-2">
-                      <div className="flex items-center">
-                        <input
-                          id="terms"
-                          type="checkbox"
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <label htmlFor="terms" className="ml-2 block text-sm text-gray-700">
-                          I agree to the <a href="#" className="text-blue-600 hover:underline">Terms of Service</a>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col space-y-3 pt-2">
-                    <button
-                      onClick={async () => {
-                        setDownloadStep(3);
-                        setIsModalProcessing(true);
-                        await handleDownloadSelected(true);
-                        setIsModalProcessing(false);
-                      }}
-                      className="w-full flex items-center justify-center px-6 py-3 border border-transparent rounded-lg shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-                    >
-                      <Download className="h-5 w-5 mr-2" />
-                      Download All ({items.length} Items)
-                    </button>
-                    
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-gray-300"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-white text-gray-500">or</span>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={async () => {
-                        setDownloadStep(3);
-                        setIsModalProcessing(true);
-                        await handleDownloadSelected(false);
-                        setIsModalProcessing(false);
-                      }}
-                      disabled={downloadSelectedItems.length === 0}
-                      className={`w-full flex items-center justify-center px-6 py-3 border rounded-lg shadow-sm text-base font-medium ${
-                        downloadSelectedItems.length > 0 
-                          ? 'text-gray-700 bg-white hover:bg-gray-50' 
-                          : 'text-gray-400 bg-gray-50 cursor-not-allowed'
-                      } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors`}
-                    >
-                      {downloadSelectedItems.length > 0 ? (
-                        <>
-                          <Download className="h-5 w-5 mr-2" />
-                          Download Selected ({downloadSelectedItems.length} Items)
-                        </>
-                      ) : (
-                        'Select items to download'
-                      )}
-                    </button>
-                  </div>
+            {downloadStep === 3 && (
+              <div>
+                <div className="flex items-center justify-center mb-2">
+                  <Check className="h-8 w-8 text-gray-700" />
                 </div>
-              ) : (
-                <div className="text-center py-4">
-                  <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100">
-                    <Check className="h-8 w-8 text-green-600" />
+                <h3 className="text-xl font-medium text-gray-900 text-center">Download Ready</h3>
+                <p className="text-sm text-gray-600 text-center mt-2">
+                  Your selected images are ready for download. Click the button below.
+                </p>
+                {downloadInlineMsg && (
+                  <div className="mt-3 text-center text-sm text-gray-700">
+                    {downloadInlineMsg}
                   </div>
-                  <h3 className="mt-4 text-lg font-medium text-gray-900">
-                    {isModalProcessing ? 'Preparing Your Download...' : 'Download Ready'}
-                  </h3>
-                  
-                  {isModalProcessing ? (
-                    <div className="mt-6 space-y-4">
-                      <div className="w-full bg-gray-200 rounded-full h-2.5">
-                        <div 
-                          className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                          style={{
-                            width: `${(downloadProgress.current / downloadProgress.total) * 100}%`,
-                            transition: 'width 0.3s ease-out'
-                          }}
-                        />
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        {downloadProgress.current} of {downloadProgress.total} files processed
-                      </p>
+                )}
+                {isModalProcessing && (
+                  <div className="mt-4">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-2 bg-gray-900 transition-all"
+                        style={{ width: `${downloadProgress.total ? Math.round((downloadProgress.current / downloadProgress.total) * 100) : 0}%` }}
+                      />
                     </div>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-sm text-gray-500">
-                        {downloadSelectedItems.length > 10 || items.length > 10 ?
-                          'Your ZIP file is ready to download.' :
-                          'Your files are ready to download.'}
-                      </p>
-                      {downloadInlineMsg && (
-                        <p className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-                          {downloadInlineMsg}
-                        </p>
-                      )}
-                      <div className="mt-6">
-                        <button
-                          onClick={() => {
-                            setIsDownloadModalOpen(false);
-                            setDownloadStep(1);
-                            setEmailInput('');
-                          }}
-                          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-                        >
-                          Done
-                        </button>
-                      </div>
-                    </>
-                  )}
+                    <div className="mt-2 text-xs text-gray-600 text-center">
+                      {downloadProgress.current}/{downloadProgress.total || 0} items
+                    </div>
+                  </div>
+                )}
+                <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+                  <button onClick={()=>!isModalProcessing && setIsDownloadModalOpen(false)} disabled={isModalProcessing} className={`px-4 py-2 rounded-lg border ${isModalProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}>Close</button>
+                  <button
+                    onClick={async ()=>{
+                      const total = downloadSelectedItems.length;
+                      if (total === 0) return;
+                      setIsModalProcessing(true);
+                      setModalProcessingAction('selected');
+                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      const success = await handleDownloadSelected(false);
+                      if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
+                      setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
+                      setIsModalProcessing(false);
+                      setModalProcessingAction(null);
+                    }}
+                    disabled={downloadSelectedItems.length === 0 || isModalProcessing}
+                    className={`px-5 py-2 rounded-lg ${downloadSelectedItems.length === 0 || isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                  >
+                    {isModalProcessing && modalProcessingAction === 'selected' ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Downloading ({downloadProgress.current}/{downloadProgress.total || downloadSelectedItems.length})
+                      </span>
+                    ) : (
+                      <>Download Selected ({downloadSelectedItems.length})</>
+                    )}
+                  </button>
+                  <button
+                    onClick={async ()=>{
+                      const total = items.length;
+                      setIsModalProcessing(true);
+                      setModalProcessingAction('all');
+                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      const success = await handleDownloadSelected(true);
+                      if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
+                      setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
+                      setIsModalProcessing(false);
+                      setModalProcessingAction(null);
+                    }}
+                    disabled={isModalProcessing}
+                    className={`px-5 py-2 rounded-lg ${isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                  >
+                    {isModalProcessing && modalProcessingAction === 'all' ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Downloading ({downloadProgress.current}/{downloadProgress.total || items.length})
+                      </span>
+                    ) : (
+                      <>Download All ({items.length})</>
+                    )}
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1839,7 +1510,7 @@ function SharedImages() {
               <div className="space-y-3">
                 <a
                   href="mailto:arifphotographyprimerpro@gmail.com"
-                  className="flex items-center gap-3 text-gray.ts-400 hover:text-white transition-colors group"
+                  className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors group"
                 >
                   <Mail className="h-4 w-4 group-hover:scale-110 transition-transform" />
                   <span className="text-sm font-light">arifphotographyprimerpro@gmail.com</span>
