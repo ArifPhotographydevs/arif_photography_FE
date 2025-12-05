@@ -35,6 +35,8 @@ import {
   Play,
   Upload,
   GripVertical,
+  MessageCircle,
+  Send,
 } from 'lucide-react';
 
 // -------------------- Interfaces --------------------
@@ -57,6 +59,14 @@ interface GalleryItem {
 interface FolderItem {
   name: string;
   path: string;
+}
+
+// ==================== Comment Interface ====================
+interface Comment {
+  id: string;
+  text: string;
+  timestamp: number;
+  author?: string; // Optional: can be extended with user info
 }
 
 type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'none';
@@ -131,6 +141,9 @@ class GalleryErrorBoundary extends Component<{ children: React.ReactNode }, { ha
 const SHARE_API = 'https://q494j11s0d.execute-api.eu-north-1.amazonaws.com/default/sharelink';
 // backend endpoint to register/access shared folder links
 const SHARE_API_ACCESS = 'https://t5g7mczss8.execute-api.eu-north-1.amazonaws.com/default/SharedLinkAccess';
+  // Comments API endpoints
+  const COMMENTS_API_POST = 'https://hqetpg95gd.execute-api.eu-north-1.amazonaws.com/default/gallery-post-comment'; // POST endpoint for adding comments
+  const COMMENTS_API_GET = 'https://djiygp0t26.execute-api.eu-north-1.amazonaws.com/default/gallery-get-comments'; // GET endpoint for fetching comments
 
 // If you want a default TTL for presigned links, set it here:
 const DEFAULT_EXPIRY_SECONDS = 3600;
@@ -141,22 +154,47 @@ const PRESIGNED_BATCH_SIZE = 200;
 // Max concurrent uploads (to avoid overwhelming network/S3)
 const MAX_CONCURRENT_UPLOADS = 20;
 
-// -------------------- Main Component --------------------
+// ==================== Main Gallery Component ====================
+/**
+ * Gallery Management Component
+ * 
+ * Main component for managing and displaying gallery images and folders.
+ * Features include:
+ * - Multi-directional drag and drop reordering
+ * - Image/folder selection and bulk operations
+ * - Grid and list view modes
+ * - Filtering and sorting
+ * - Image preview modal
+ * - Sharing functionality
+ * - Upload with watermark support
+ */
 function Gallery() {
+  // ==================== Navigation & Routing ====================
   const navigate = useNavigate();
   const location = useLocation();
+  // Extract current folder path from URL (removes '/gallery' prefix)
   const currentPath = location.pathname.replace('/gallery', '');
+  
+  // ==================== UI State Management ====================
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [items, setItems] = useState<GalleryItem[]>([]);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deleteLoading, setDeleteLoading] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
-  const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid'); // Display mode: grid or list
+  const [showFilters, setShowFilters] = useState(false); // Filter panel visibility
+  
+  // ==================== Data State Management ====================
+  const [items, setItems] = useState<GalleryItem[]>([]); // All gallery images/videos
+  const [folders, setFolders] = useState<FolderItem[]>([]); // All folders in current path
+  const [selectedItems, setSelectedItems] = useState<string[]>([]); // Selected items for bulk operations
+  
+  // ==================== Loading & Error States ====================
+  const [loading, setLoading] = useState(true); // Initial data loading state
+  const [deleteLoading, setDeleteLoading] = useState<string[]>([]); // Items currently being deleted
+  const [error, setError] = useState<string | null>(null); // Error message state
+  const [deleteErrors, setDeleteErrors] = useState<DeleteError[]>([]); // Deletion error details
+  
+  // ==================== Notification System ====================
+  const [notifications, setNotifications] = useState<Notification[]>([]); // Toast notifications
+  
+  // ==================== Modal States ====================
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; currentImage: GalleryItem | null; }>({ isOpen: false, currentImage: null });
   const [shareModal, setShareModal] = useState<{ 
     isOpen: boolean; 
@@ -164,6 +202,22 @@ function Gallery() {
     serverMessage?: string | null;
     sharePin?: string;
   }>({ isOpen: false, links: [], serverMessage: null, sharePin: '' });
+  
+  // ==================== Comment System ====================
+  // Comments are stored per image ID: { [imageId]: Comment[] }
+  const [comments, setComments] = useState<Record<string, Comment[]>>(() => {
+    // Load comments from localStorage on init
+    try {
+      const saved = localStorage.getItem('galleryComments');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load comments:', error);
+      return {};
+    }
+  });
+  const [showComments, setShowComments] = useState(false); // Toggle comment section visibility
+  const [newComment, setNewComment] = useState(''); // Current comment input value
+  const [commentLoading, setCommentLoading] = useState(false); // Loading state for comment operations
   const [sharePin, setSharePin] = useState('');
   const [activeShareLinks, setActiveShareLinks] = useState<Array<{
     id: string;
@@ -196,9 +250,17 @@ function Gallery() {
   const [imageListLoading, setImageListLoading] = useState(false); // New: Loader for image list
   const [dragActive, setDragActive] = useState(false); // For drag and drop
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set()); // Track loaded images
-  const [dragId, setDragId] = useState<string | null>(null); // For image reordering drag
-  const [dragOverId, setDragOverId] = useState<string | null>(null); // Track which item is being dragged over
-  const dragJustEndedRef = useRef(false); // Track if drag just ended to prevent click
+  // ==================== Drag and Drop State Management ====================
+  // dragId: Tracks which image is currently being dragged (null when not dragging)
+  const [dragId, setDragId] = useState<string | null>(null);
+  
+  // dragOverId: Tracks which image is currently being hovered over as a drop target
+  // This provides visual feedback showing where the dragged item will be placed
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  
+  // dragJustEndedRef: Prevents accidental clicks immediately after drag ends
+  // Used to distinguish between drag operations and click events
+  const dragJustEndedRef = useRef(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState(false); // Enable watermark for uploads
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('bottom-right'); // Default watermark position
   const [watermarkImage, setWatermarkImage] = useState<string | null>(null); // Watermark image (base64)
@@ -750,8 +812,8 @@ function Gallery() {
     }
 
     // Update in React state
-    setActiveShareLinks(prev =>
-      prev.map(link =>
+    setActiveShareLinks((prev) =>
+      prev.map((link) =>
         link.id === linkId ? { ...link, isActive: false } : link
       )
     );
@@ -769,6 +831,28 @@ function Gallery() {
     }
 
     addNotification('Share link disabled successfully', 'success');
+  };
+
+  // Permanently delete a share link and notify backend
+  const deleteShareLink = async (linkId: string) => {
+    const current = activeShareLinks.find((l) => l.id === linkId);
+
+    // Call backend delete if we have a sharedId
+    if (current?.sharedId) {
+      await deleteShareLinkOnServer(current.sharedId);
+    }
+
+    // Remove from React state
+    setActiveShareLinks((prev) => prev.filter((link) => link.id !== linkId));
+
+    // Remove from localStorage if present
+    try {
+      localStorage.removeItem(`share_${linkId}`);
+    } catch (e) {
+      console.error('Failed to remove share link from localStorage', e);
+    }
+
+    addNotification('Share link deleted successfully', 'success');
   };
 
   // Call backend to revoke a share link by its sharedId
@@ -802,6 +886,81 @@ function Gallery() {
       console.error('revoke_share_link API call failed:', e);
       addNotification(
         `Server revoke failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+    }
+  };
+
+  // Call backend to re-grant access (enable) a share link by its sharedId
+  const grantShareLinkAccessOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'grant_share_link_access',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to enable share link on server';
+        console.error('grant_share_link_access API error:', msg);
+        addNotification(`Server enable failed: ${msg}`, 'error');
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.error('grant_share_link_access API call failed:', e);
+      addNotification(
+        `Server enable failed: ${e.message || 'Unexpected error'}`,
+        'error'
+      );
+      return false;
+    }
+  };
+
+  // Call backend to permanently delete a share link by its sharedId
+  const deleteShareLinkOnServer = async (sharedId: string) => {
+    try {
+      const res = await fetch(SHARE_API_ACCESS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({
+          action: 'delete_share_link',
+          sharedId,
+        }),
+      });
+      const txt = await res.text();
+      let data: any = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || data.success === false) {
+        const msg =
+          (data && data.message) ||
+          txt ||
+          'Failed to delete share link on server';
+        console.error('delete_share_link API error:', msg);
+        addNotification(`Server delete failed: ${msg}`, 'error');
+      }
+    } catch (e: any) {
+      console.error('delete_share_link API call failed:', e);
+      addNotification(
+        `Server delete failed: ${e.message || 'Unexpected error'}`,
         'error'
       );
     }
@@ -860,17 +1019,14 @@ function Gallery() {
       );
       await revokeShareLinkOnServer(current.sharedId);
     } else {
-      // Enabling: check status on server; if still revoked, do not enable locally
+      // Enabling: call grant_share_link_access so backend marks it active again
       console.debug(
-        '[share] Enabling link, checking get_share_link_status for sharedId:',
+        '[share] Enabling link, calling grant_share_link_access for sharedId:',
         current.sharedId
       );
-      const status = await getShareLinkStatusFromServer(current.sharedId);
-      if (!status || status.isActive === false) {
-        addNotification(
-          'This link is revoked or inactive on the server and cannot be re-activated.',
-          'error'
-        );
+      const ok = await grantShareLinkAccessOnServer(current.sharedId);
+      if (!ok) {
+        // Do not flip UI/localStorage if server failed
         return;
       }
     }
@@ -1015,12 +1171,32 @@ const handleShare = async () => {
   }
 };
 
-  // -------------------- Filters & sorting (unchanged logic from original) --------------------
+  // ==================== Filtering & Sorting ====================
+  /**
+   * Filtered and sorted images based on current filter and sort settings.
+   * 
+   * Filters applied:
+   * - Month filter: Filter by event/upload month
+   * - Shoot type filter: Filter by photography type (Wedding, Portrait, etc.)
+   * - Search text filter: Filter by title/keyword search
+   * - Favorites filter: Show only favorited items
+   * - Watermarked filter: Show only watermarked items
+   * - PIN protected filter: Show only PIN-protected items
+   * 
+   * Sorting options:
+   * - Custom: Uses drag-and-drop order (order property)
+   * - Title: Alphabetical sorting by image title
+   * - Event date: Sort by event date
+   * - Shoot type: Sort by photography type
+   * - Upload date: Default sorting by upload timestamp
+   */
   const filteredImages = items
     .filter((item) => {
+      // Extract month from event date or upload date for month filtering
       const eventDate = item.eventDate ? new Date(item.eventDate) : new Date(item.uploadDate || Date.now());
       const itemMonth = eventDate.toLocaleString('default', { month: 'long' });
 
+      // Apply all active filters (each filter is optional - if not set, it passes)
       const matchesMonth = !filters.month || itemMonth === filters.month;
       const matchesShootType = !filters.shootType || item.shootType === filters.shootType;
       const matchesSearch = !filters.search || item.title.toLowerCase().includes(filters.search.toLowerCase());
@@ -1028,33 +1204,42 @@ const handleShare = async () => {
       const matchesWatermarked = !filters.watermarked || item.isWatermarked;
       const matchesPinProtected = !filters.pinProtected || item.isPinProtected;
 
+      // Item must match ALL active filters to be included
       return matchesMonth && matchesShootType && matchesSearch && matchesFavorites && matchesWatermarked && matchesPinProtected;
     })
     .sort((a, b) => {
       let aValue: any, bValue: any;
 
+      // Determine sort values based on selected sort criteria
       switch (sortBy) {
         case 'custom':
+          // Custom order uses the 'order' property set by drag-and-drop
+          // Items without order go to the end (MAX_SAFE_INTEGER)
           aValue = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
           bValue = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
           break;
         case 'title':
+          // Alphabetical sorting (case-insensitive)
           aValue = a.title.toLowerCase();
           bValue = b.title.toLowerCase();
           break;
         case 'eventDate':
+          // Sort by event date
           aValue = new Date(a.eventDate);
           bValue = new Date(b.eventDate);
           break;
         case 'shootType':
+          // Sort by photography type
           aValue = a.shootType;
           bValue = b.shootType;
           break;
         default:
+          // Default: sort by upload date (most recent first)
           aValue = new Date(a.uploadDate);
           bValue = new Date(b.uploadDate);
       }
 
+      // Apply sort order (ascending or descending)
       if (sortOrder === 'asc') {
         return aValue > bValue ? 1 : -1;
       } else {
@@ -1062,86 +1247,168 @@ const handleShare = async () => {
       }
     });
 
-  // -------------------- Drag and Drop Reordering Handlers --------------------
+  // ==================== Drag and Drop Reordering Handlers ====================
+  /**
+   * Initiates drag operation when user starts dragging an image
+   * @param e - Drag event object
+   * @param id - Unique identifier of the image being dragged
+   * 
+   * Sets up the drag data transfer and marks this item as the active drag item.
+   * This enables multi-directional dragging (top-to-bottom, bottom-to-top, left-to-right, etc.)
+   */
   const handleDragStartItem = useCallback((e: React.DragEvent, id: string) => {
+    // Set the drag effect to 'move' to indicate this is a move operation
     e.dataTransfer.effectAllowed = 'move';
+    // Store the item ID in the drag data for later retrieval
     e.dataTransfer.setData('text/plain', id);
+    // Mark this item as the one being dragged
     setDragId(id);
+    // Reset the drag-just-ended flag to allow normal interactions
     dragJustEndedRef.current = false;
   }, []);
 
+  /**
+   * Handles drag over event - fires continuously while dragging over an item
+   * @param e - Drag event object
+   * @param targetId - Unique identifier of the item being dragged over
+   * 
+   * This is called repeatedly as the user drags over different items.
+   * It provides visual feedback by highlighting the potential drop target.
+   */
   const handleDragOverItem = useCallback((e: React.DragEvent, targetId: string) => {
+    // Prevent default to allow drop
     e.preventDefault();
     e.stopPropagation();
+    // Set the visual drop effect cursor
     e.dataTransfer.dropEffect = 'move';
     
+    // Only update drag over state if we're dragging a different item
     if (dragId && dragId !== targetId) {
       setDragOverId(targetId);
     }
   }, [dragId]);
 
+  /**
+   * Handles drag enter event - fires when drag first enters an item's boundaries
+   * @param e - Drag event object
+   * @param targetId - Unique identifier of the item being entered
+   * 
+   * This provides immediate visual feedback when entering a new drop zone.
+   * Works in conjunction with handleDragOverItem for smooth multi-directional dragging.
+   */
   const handleDragEnterItem = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
+    // Mark this item as the current drop target
     if (dragId && dragId !== targetId) {
       setDragOverId(targetId);
     }
   }, [dragId]);
 
+  /**
+   * Handles drag leave event - fires when drag leaves an item's boundaries
+   * @param e - Drag event object
+   * 
+   * Important: Only clears the drag-over state if we're actually leaving the element,
+   * not just moving to a child element (like the image or checkbox inside).
+   * This prevents flickering during drag operations.
+   */
   const handleDragLeaveItem = useCallback((e: React.DragEvent) => {
-    // Only clear if we're actually leaving the element (not just moving to a child)
+    // Get the bounding rectangle of the current element
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = e.clientX;
     const y = e.clientY;
     
+    // Only clear drag-over state if cursor is actually outside the element boundaries
+    // This prevents false triggers when moving between child elements
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       setDragOverId(null);
     }
   }, []);
 
+  /**
+   * Handles drop event - completes the drag and drop operation
+   * @param e - Drag event object
+   * @param targetId - Unique identifier of the item where the drag was dropped
+   * 
+   * This function:
+   * 1. Validates the drop operation
+   * 2. Reorders the images array based on the drag position
+   * 3. Updates the sort mode to 'custom' to preserve the new order
+   * 4. Updates each item's 'order' property for persistence
+   * 5. Provides user feedback via notification
+   * 
+   * Supports dragging in any direction: top-to-bottom, bottom-to-top, left-to-right, etc.
+   */
   const handleDropOnItem = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
     
+    // Validate: ensure we have a valid drag operation and different source/target
     if (!dragId || dragId === targetId) {
       setDragId(null);
       setDragOverId(null);
       return;
     }
     
+    // Switch to custom sort mode to preserve the new order
     setSortBy('custom');
+    
+    // Update the items array with the new order
     setItems((prev) => {
+      // Get all IDs currently visible in the filtered view
       const idsInView = new Set(filteredImages.map((i) => i.id));
+      // Get the current order of items as an array of IDs
       const currentOrder = filteredImages.map((i) => i.id);
+      
+      // Find the positions of source and target items
       const from = currentOrder.indexOf(dragId);
       const to = currentOrder.indexOf(targetId);
       
+      // Validate positions exist
       if (from === -1 || to === -1) {
         setDragId(null);
         setDragOverId(null);
         return prev;
       }
       
+      // Create new order by moving item from 'from' position to 'to' position
       const newOrder = [...currentOrder];
-      const [moved] = newOrder.splice(from, 1);
-      newOrder.splice(to, 0, moved);
+      const [moved] = newOrder.splice(from, 1); // Remove from original position
+      newOrder.splice(to, 0, moved); // Insert at new position
       
+      // Create a map of new order positions for each item
       const orderMap = new Map<string, number>();
       newOrder.forEach((id, i) => orderMap.set(id, i));
       
+      // Update items with new order values, preserving other properties
       return prev.map((it) => (idsInView.has(it.id) ? { ...it, order: orderMap.get(it.id) } : it));
     });
     
+    // Clean up drag state
     setDragId(null);
     setDragOverId(null);
+    
+    // Notify user of successful reorder
     addNotification('Image order updated', 'success');
   }, [dragId, filteredImages, setSortBy, addNotification]);
 
+  /**
+   * Handles drag end event - cleans up after drag operation completes
+   * 
+   * This is called when the drag operation ends (whether successful or cancelled).
+   * It cleans up all drag-related state and prevents accidental clicks immediately after drag.
+   */
   const handleDragEndItem = useCallback(() => {
+    // Clear all drag state
     setDragId(null);
     setDragOverId(null);
+    
+    // Set flag to prevent accidental click events immediately after drag
+    // This helps distinguish between drag operations and intentional clicks
     dragJustEndedRef.current = true;
-    // Reset after a short delay to allow click events
+    
+    // Reset the flag after a short delay to allow normal click interactions
     setTimeout(() => {
       dragJustEndedRef.current = false;
     }, 100);
@@ -1179,6 +1446,10 @@ const handleShare = async () => {
 
   const handleImageClick = (item: GalleryItem) => {
     setPreviewModal({ isOpen: true, currentImage: item });
+    // Reset comment input when opening preview
+    setNewComment('');
+    // Fetch comments for this image from API
+    fetchCommentsForImage(item.id, item.key);
   };
 
   const handleClosePreview = () => {
@@ -1188,6 +1459,228 @@ const handleShare = async () => {
       videoElement.pause();
     }
     setPreviewModal({ isOpen: false, currentImage: null });
+    // Close comment section when closing preview
+    setShowComments(false);
+    setNewComment('');
+  };
+
+  // ==================== Comment Handlers ====================
+  /**
+   * Adds a new comment to the current image via Lambda API
+   * Comments are saved to the backend API and also cached in localStorage
+   * API Route: POST /GalleryComments
+   */
+  const handleAddComment = async () => {
+    if (!previewModal.currentImage || !newComment.trim() || commentLoading) return;
+
+    const imageId = previewModal.currentImage.id;
+    const imageKey = previewModal.currentImage.key || imageId;
+    const commentText = newComment.trim();
+    
+    setCommentLoading(true);
+
+    try {
+      console.log('Posting comment to:', COMMENTS_API_POST);
+      console.log('ImageId:', imageId);
+      console.log('ImageKey:', imageKey);
+
+      // Prepare payload for API - include imageId/imageKey in body
+      const payload = {
+        imageId: imageId,
+        imageKey: imageKey,
+        author: 'User',
+        text: commentText.trim(),
+      };
+
+      // Post comment to Lambda API - route is /GalleryComments
+      const response = await fetch(COMMENTS_API_POST, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        mode: 'cors',
+      });
+
+      console.log('Response status:', response.status, response.statusText);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `Failed to post comment: ${response.status} ${response.statusText}`;
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.message || errorJson.error || errorMessage;
+        } catch {
+          // If not JSON, use the text as is
+          if (errorText) errorMessage = errorText;
+        }
+        
+        console.error('API Response Error:', response.status, errorText);
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      console.log('Comment added successfully:', result);
+      
+      // Create comment object from API response
+      const comment: Comment = {
+        id: result.commentId || result.id || Date.now().toString(),
+        text: commentText,
+        timestamp: result.timestamp ? new Date(result.timestamp).getTime() : Date.now(),
+        author: result.author || payload.author,
+      };
+
+      // Update local state
+      const updatedComments = {
+        ...comments,
+        [imageId]: [...(comments[imageId] || []), comment],
+      };
+
+      setComments(updatedComments);
+      
+      // Save to localStorage as cache/backup
+      try {
+        localStorage.setItem('galleryComments', JSON.stringify(updatedComments));
+      } catch (error) {
+        console.error('Failed to save comment to localStorage:', error);
+      }
+
+      setNewComment('');
+      addNotification('Comment added successfully', 'success');
+      
+      // Refresh comments from API after successful post
+      if (previewModal.currentImage) {
+        await fetchCommentsForImage(previewModal.currentImage.id, previewModal.currentImage.key);
+      }
+    } catch (error: any) {
+      console.error('Error posting comment:', error);
+      
+      // Better error message for CORS issues
+      if (error.message?.includes('CORS') || error.message?.includes('Failed to fetch')) {
+        addNotification('CORS error: Please check API Gateway CORS settings', 'error');
+      } else {
+        addNotification(`Failed to add comment: ${error.message || 'Unknown error'}`, 'error');
+      }
+    } finally {
+      setCommentLoading(false);
+    }
+  };
+
+  /**
+   * Deletes a comment by ID
+   */
+  const handleDeleteComment = (imageId: string, commentId: string) => {
+    const updatedComments = {
+      ...comments,
+      [imageId]: (comments[imageId] || []).filter((c) => c.id !== commentId),
+    };
+
+    setComments(updatedComments);
+    
+    // Save to localStorage
+    try {
+      localStorage.setItem('galleryComments', JSON.stringify(updatedComments));
+    } catch (error) {
+      console.error('Failed to delete comment:', error);
+    }
+
+    addNotification('Comment deleted', 'info');
+  };
+
+  /**
+   * Fetches comments for a specific image from the API
+   * @param imageId - The image ID to fetch comments for
+   * @param imageKey - The image key/path (optional, for API query)
+   */
+  const fetchCommentsForImage = async (imageId: string, imageKey?: string) => {
+    try {
+      // Build query parameters
+      const params = new URLSearchParams({
+        imageId: imageId,
+      });
+      if (imageKey) {
+        params.append('imageKey', imageKey);
+      }
+
+      const apiUrl = `${COMMENTS_API_GET}?${params.toString()}`;
+      console.log('Fetching comments from:', apiUrl);
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+
+      if (!response.ok) {
+        console.error('Failed to fetch comments:', response.status, response.statusText);
+        return;
+      }
+
+      const result = await response.json();
+      console.log('Fetched comments:', result);
+
+      // Handle different response formats
+      let fetchedComments: Comment[] = [];
+      
+      if (Array.isArray(result)) {
+        // If response is directly an array
+        fetchedComments = result.map((item: any) => ({
+          id: item.commentId || item.id || Date.now().toString() + Math.random(),
+          text: item.text || item.comment || '',
+          timestamp: item.timestamp ? new Date(item.timestamp).getTime() : Date.now(),
+          author: item.author || 'User',
+        }));
+      } else if (result.comments && Array.isArray(result.comments)) {
+        // If response has a comments property
+        fetchedComments = result.comments.map((item: any) => ({
+          id: item.commentId || item.id || Date.now().toString() + Math.random(),
+          text: item.text || item.comment || '',
+          timestamp: item.timestamp ? new Date(item.timestamp).getTime() : Date.now(),
+          author: item.author || 'User',
+        }));
+      } else if (result.data && Array.isArray(result.data)) {
+        // If response has a data property
+        fetchedComments = result.data.map((item: any) => ({
+          id: item.commentId || item.id || Date.now().toString() + Math.random(),
+          text: item.text || item.comment || '',
+          timestamp: item.timestamp ? new Date(item.timestamp).getTime() : Date.now(),
+          author: item.author || 'User',
+        }));
+      }
+
+      // Update comments state
+      if (fetchedComments.length > 0) {
+        setComments((prev) => ({
+          ...prev,
+          [imageId]: fetchedComments,
+        }));
+
+        // Save to localStorage as cache
+        try {
+          const updatedComments = {
+            ...comments,
+            [imageId]: fetchedComments,
+          };
+          localStorage.setItem('galleryComments', JSON.stringify(updatedComments));
+        } catch (error) {
+          console.error('Failed to save comments to localStorage:', error);
+        }
+      }
+    } catch (error: any) {
+      console.error('Error fetching comments:', error);
+      // Don't show error notification for fetch failures - just use cached/local comments
+    }
+  };
+
+  /**
+   * Gets comments for the current image
+   */
+  const getCurrentImageComments = (): Comment[] => {
+    if (!previewModal.currentImage) return [];
+    return comments[previewModal.currentImage.id] || [];
   };
 
   // Navigate between images in preview modal
@@ -2768,24 +3261,43 @@ const handleShare = async () => {
                         </div>
                       ))}
 
-                      {/* Images/Videos */}
+                      {/* ==================== Images/Videos Grid ==================== */}
+                      {/* 
+                        Render all filtered images/videos with drag and drop functionality.
+                        Each item can be dragged in any direction (top-to-bottom, bottom-to-top, etc.)
+                        to reorder the gallery.
+                      */}
                       {filteredImages.map((item) => (
                         <div
                           key={item.id}
                           className={`group relative ${
+                            // Visual indicator for selected items (checkbox selection)
                             selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 ring-offset-2' : ''
                           } ${
+                            // Visual feedback for the item being dragged:
+                            // - Reduced opacity (50%) to show it's being moved
+                            // - Slightly scaled down (95%) for visual effect
+                            // - Higher z-index (z-50) to appear above other items
+                            // - Enhanced shadow for depth
                             dragId === item.id ? 'opacity-50 scale-95 cursor-grabbing z-50 shadow-2xl' : ''
                           } ${
+                            // Visual feedback for the drop target:
+                            // - Blue ring to indicate valid drop zone
+                            // - Slightly scaled up (105%) to show it's the target
+                            // - Light blue background for emphasis
+                            // - Higher z-index (z-40) to appear above non-target items
                             dragOverId === item.id && dragId !== item.id ? 'ring-2 ring-blue-400 ring-offset-2 scale-105 bg-blue-50/50 z-40' : ''
                           } ${
+                            // Different styling based on view mode (compact grid, regular grid, or list)
                             compactView && viewMode === 'grid'
                               ? 'rounded-lg overflow-hidden break-inside-avoid inline-block w-full mb-3'
                               : (viewMode === 'grid'
                                   ? 'bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden'
                                   : 'flex items-center space-x-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200')
                           }`}
+                          // Enable HTML5 drag and drop API
                           draggable={true}
+                          // Drag event handlers for multi-directional reordering
                           onDragStart={(e) => handleDragStartItem(e, item.id)}
                           onDragEnter={(e) => handleDragEnterItem(e, item.id)}
                           onDragOver={(e) => handleDragOverItem(e, item.id)}
@@ -2793,11 +3305,13 @@ const handleShare = async () => {
                           onDrop={(e) => handleDropOnItem(e, item.id)}
                           onDragEnd={handleDragEndItem}
                           style={{ 
+                            // Change cursor to indicate draggable state
                             cursor: dragId === item.id ? 'grabbing' : 'grab',
+                            // Disable transitions during drag for smoother movement
                             transition: dragId === item.id ? 'none' : 'all 0.2s ease'
                           }}
                         >
-                          {/* Drag Handle */}
+                          {/* Drag Handle Icon - appears on hover to indicate draggability */}
                           <div className="absolute top-2 left-2 z-10 p-1.5 bg-white/90 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-grab active:cursor-grabbing">
                             <GripVertical className="h-4 w-4 text-gray-500" />
                           </div>
@@ -2807,9 +3321,11 @@ const handleShare = async () => {
                             onChange={(e) => handleSelectItem(item.id, e.target.checked)}
                             className="absolute top-2 right-2 h-5 w-5 text-[#00BCEB] focus:ring-[#00BCEB] border-2 border-white rounded bg-white shadow-lg z-10 cursor-pointer"
                           />
+                          {/* Image/Video Container - clickable to open preview */}
                           <div
                             onClick={() => {
-                              // Prevent click if we just finished dragging
+                              // Prevent accidental click events immediately after drag ends
+                              // This ensures drag operations don't trigger unwanted preview opens
                               if (!dragJustEndedRef.current) {
                                 handleImageClick(item);
                               }
@@ -3057,19 +3573,160 @@ const handleShare = async () => {
                   <div className="mt-3 flex space-x-2">
                     <button
                       onClick={() => handleDownloadItem(previewModal.currentImage!)}
-                      className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg text-sm"
+                      className="px-3 py-1.5 bg-[#00BCEB] text-white rounded-lg text-sm hover:bg-[#00a8d4] transition-colors"
                     >
                       <Download className="w-4 h-4 inline mr-1" />
                       Download
                     </button>
                     <button
                       onClick={() => handleShareSingle(previewModal.currentImage!)}
-                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm"
+                      className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-lg text-sm hover:bg-[#e55a00] transition-colors"
                     >
                       <Share2 className="w-4 h-4 inline mr-1" />
                       Share
                     </button>
+                    <button
+                      onClick={() => {
+                        const newShowState = !showComments;
+                        setShowComments(newShowState);
+                        // Fetch comments when opening the comments section
+                        if (newShowState && previewModal.currentImage) {
+                          fetchCommentsForImage(previewModal.currentImage.id, previewModal.currentImage.key);
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center ${
+                        showComments
+                          ? 'bg-gray-700 text-white hover:bg-gray-600'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                      title="Toggle comments"
+                    >
+                      <MessageCircle className="w-4 h-4 inline mr-1" />
+                      Comments
+                      {getCurrentImageComments().length > 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">
+                          {getCurrentImageComments().length}
+                        </span>
+                      )}
+                    </button>
                   </div>
+
+                  {/* Comment Section */}
+                  {showComments && (
+                    <div className="mt-4 border-t pt-4" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                        <MessageCircle className="w-4 h-4 mr-2" />
+                        Comments ({getCurrentImageComments().length})
+                      </h3>
+                      
+                      {/* Comments List */}
+                      <div className="max-h-48 overflow-y-auto mb-4 space-y-3">
+                        {getCurrentImageComments().length === 0 ? (
+                          <p className="text-sm text-gray-500 italic">No comments yet. Be the first to comment!</p>
+                        ) : (
+                          getCurrentImageComments().map((comment) => (
+                            <div
+                              key={comment.id}
+                              className="bg-gray-50 rounded-lg p-3 border border-gray-200"
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <p className="text-sm text-gray-800 break-words">{comment.text}</p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {new Date(comment.timestamp).toLocaleString()}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteComment(previewModal.currentImage!.id, comment.id);
+                                  }}
+                                  className="ml-2 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+                                  title="Delete comment"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Comment Input - Improved UI */}
+                      <div 
+                        className="bg-gray-50 rounded-lg p-3 border-2 border-gray-200 focus-within:border-[#00BCEB] transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Focus the textarea when clicking the container
+                          const textarea = e.currentTarget.querySelector('textarea');
+                          if (textarea) textarea.focus();
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <textarea
+                          value={newComment}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setNewComment(e.target.value);
+                          }}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            // Submit on Enter (without Shift), prevent default newline
+                            if (e.key === 'Enter' && !e.shiftKey && !commentLoading && newComment.trim()) {
+                              e.preventDefault();
+                              handleAddComment();
+                            }
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onFocus={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          placeholder="Write a comment... (Press Enter to submit, Shift+Enter for new line)"
+                          disabled={commentLoading}
+                          autoComplete="off"
+                          rows={3}
+                          className="w-full px-3 py-2 border-0 bg-transparent resize-none focus:outline-none text-sm text-gray-800 placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ 
+                            pointerEvents: commentLoading ? 'none' : 'auto',
+                            minHeight: '60px',
+                            maxHeight: '120px'
+                          }}
+                        />
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                          <span className="text-xs text-gray-500">
+                            {newComment.length > 0 && `${newComment.length} characters`}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleAddComment();
+                            }}
+                            disabled={!newComment.trim() || commentLoading}
+                            className="px-4 py-1.5 bg-[#00BCEB] text-white rounded-lg hover:bg-[#00a8d4] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm font-medium"
+                            title="Add comment (Enter)"
+                          >
+                            {commentLoading ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Posting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-4 h-4" />
+                                <span>Post Comment</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3237,9 +3894,9 @@ const handleShare = async () => {
                                       <Copy className="w-3.5 h-3.5" />
                                     </button>
                                     <button
-                                      onClick={() => revokeShareLink(shareLink.id)}
+                                      onClick={() => deleteShareLink(shareLink.id)}
                                       className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
-                                      title="Revoke access"
+                                      title="Delete link"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
