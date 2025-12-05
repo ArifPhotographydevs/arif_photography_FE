@@ -3208,7 +3208,7 @@ const handleShare = async () => {
                       }`}
                     >
                       {/* Folders */}
-                      {!compactView && folders.map((folder) => (
+                      {folders.map((folder) => (
                         <div
                           key={folder.path}
                           className={`group relative p-6 bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-blue-100 hover:-translate-y-1 transition-all duration-300 ease-out overflow-hidden ${

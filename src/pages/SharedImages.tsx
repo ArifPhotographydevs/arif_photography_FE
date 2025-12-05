@@ -1,7 +1,8 @@
 // @ts-ignore - React is needed for JSX runtime despite react-jsx transform
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { downloadFiles } from '../api/downloadAPI';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
   ArrowLeft,
   Grid3X3,
@@ -24,6 +25,7 @@ import {
   Instagram,
   Facebook,
   Camera,
+  Package,
 } from 'lucide-react';
 import { createFavoritesFolderAPI } from '../api/favoritesAPI';
 
@@ -171,6 +173,8 @@ function SharedImages() {
         setLoading(false);
       }
     };
+
+  
 
     checkShareLinkAccess();
   }, [shareId]);
@@ -457,19 +461,9 @@ function SharedImages() {
     );
   };
 
-  const handleDownloadSelectAll = () => {
-    if (downloadSelectedItems.length === items.length) {
-      setDownloadSelectedItems([]);
-      addNotification('All images unselected from download', 'info');
-    } else {
-      const allIds = items.map(i => i.id);
-      setDownloadSelectedItems(allIds);
-      addNotification('All images selected for download', 'success');
-    }
-  };
-
   const addNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Date.now().toString();
+    // Ensure uniqueness even for multiple notifications in the same millisecond
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setNotifications(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -480,203 +474,86 @@ function SharedImages() {
     window.history.back();
   };
 
-  // Quick download from toolbar: download selected-for-download, else all
-  const fetchAllImages = async (prefix: string): Promise<GalleryItem[]> => {
+  // fetchAllImages was previously used by a different download flow; removed as unused.
+
+  // Download a zip via Lambda using file keys (avoids direct Wasabi CORS)
+  const downloadWithLambda = async (fileKeys: string[], zipName: string) => {
     try {
-      const response = await fetch(
-        `https://a9017femoa.execute-api.eu-north-1.amazonaws.com/default/getallimages?prefix=${encodeURIComponent(prefix)}&recursive=true`,
-        {
-          method: 'GET',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          mode: 'cors',
-          credentials: 'include' // Include credentials for CORS
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server response:', errorText);
-        throw new Error(`Failed to fetch all images: ${response.status} ${response.statusText}`);
-      }
-
-      const data: ApiResponse = await response.json();
-      if (!data || !Array.isArray(data.files)) {
-        throw new Error('Unexpected API response format');
-      }
-
-      return data.files
-        .map((item: any) => {
-          if (!item.key || typeof item.key !== 'string' || !item.key.includes('/') || item.key.trim() === '' || !item.key.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|mkv)$/i)) {
-            return null;
-          }
-          const keyParts = item.key.split('/');
-          const rawTitle = keyParts.pop() || 'Untitled';
-          const title = rawTitle.replace(/\.[^/.]+$/, '');
-          let eventDate = item.last_modified ? item.last_modified.split('T')[0] : '';
-          const dateMatch = title.match(/(\d{4})(\d{2})(\d{2})/);
-          if (dateMatch) {
-            eventDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-          }
-          const isVideo = !!item.key.match(/\.(mp4|mov|avi|wmv|mkv)$/i);
-          const folderPath = keyParts.join('/');
-          const subfolderName = folderPath.replace(prefix, '').split('/')[0] || 'Main Folder';
-          
-          return {
-            id: item.key,
-            shootType: title.includes('IMG') ? 'Portrait' : title.includes('Snapchat') ? 'Casual' : 'Unknown',
-            eventDate,
-            imageUrl: item.presigned_url || item.url,
-            title: `${subfolderName}: ${title}`,
-            uploadDate: item.last_modified ? item.last_modified.split('T')[0] : '',
-            isWatermarked: false,
-            isPinProtected: false,
-            isFavorite: false,
-            key: item.key,
-            isVideo,
-          } as GalleryItem;
-        })
-        .filter((item): item is GalleryItem => item !== null);
-    } catch (error) {
-      console.error('Error fetching all images:', error);
-      throw error;
-    }
-  };
-
-  const handleQuickDownload = async () => {
-    if (!permissions.canDownload) {
-      addNotification('Downloads are not permitted in this gallery', 'error');
-      return;
-    }
-    
-    try {
-      // Show email input dialog first
-      const email = prompt('Please enter your email to receive the download link:');
-      if (!email) {
-        addNotification('Download cancelled', 'info');
-        return;
-      }
-
-      // Validate email format
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        addNotification('Please enter a valid email address', 'error');
-        return;
-      }
-
-      setIsDownloading(true);
-      addNotification('Preparing your download, please wait...', 'info');
-      
-      // Get the current prefix for the API call
-      let prefix = decodedFolderPath;
-      if (prefix && !prefix.endsWith('/')) {
-        prefix += '/';
-      }
-      if (prefix.startsWith('/')) {
-        prefix = prefix.slice(1);
-      }
-      
-      // Fetch all images (including paginated ones)
-      addNotification('Gathering all images...', 'info');
-      const allImages = await fetchAllImages(prefix);
-      
-      if (allImages.length === 0) {
-        addNotification('No images found to download', 'info');
-        return;
-      }
-      
-      // Extract file keys from the images
-      const fileKeys = allImages.map(item => item.key).filter(Boolean) as string[];
-      
-      // Update progress
-      setDownloadProgress({ current: 1, total: 3 });
-      
-      // Call the Lambda function
-      addNotification('Creating your download package...', 'info');
-      
-      try {
-        // Call the Lambda function
-        const response = await fetch('https://lxdcf2aagf.execute-api.eu-north-1.amazonaws.com/default/downloadimage', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ fileKeys })
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Download failed: ${error}`);
-        }
-
-        // Get the zip file as blob
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        
-        // Create download link
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `arif-photography-${new Date().toISOString().split('T')[0]}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        // Send email confirmation
-        try {
-          await sendDownloadEmail(email, allImages.length, allImages.length);
-          addNotification('Download complete! Check your email for confirmation.', 'success');
-        } catch (emailError) {
-          console.error('Failed to send email:', emailError);
-          addNotification('Download complete, but failed to send confirmation email', 'info');
-        }
-        
-      } catch (error: any) {
-        console.error('Download error:', error);
-        addNotification(`Download failed: ${error.message}`, 'error');
-      }
-    } catch (error: any) {
-      console.error('Error preparing download:', error);
-      addNotification(`Error: ${error.message}`, 'error');
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  // Download file using Lambda function to handle CORS
-  const fetchBlobOrDownloadLink = async (url: string, filename: string) => {
-    try {
-      // Extract the key from the URL
-      const urlObj = new URL(url);
-      const key = urlObj.pathname.replace(/^\//, ''); // Remove leading slash
-      
-      // Call our Lambda function to handle the download
       const response = await fetch('https://lxdcf2aagf.execute-api.eu-north-1.amazonaws.com/default/downloadimage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fileKeys: [key] })
+        body: JSON.stringify({ fileKeys }),
       });
 
+      // Handle non-2xx with clearer messages
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Download failed: ${error}`);
+        const text = await response.text().catch(() => '');
+        if (response.status === 400) {
+          // Often used for too-large zips or bad input
+          try {
+            const j = JSON.parse(text);
+            addNotification(j?.message || j?.error || 'Download failed (bad request)', 'error');
+          } catch {
+            addNotification(text || 'Download failed (bad request)', 'error');
+          }
+        } else if (response.status === 500) {
+          addNotification('Server error while preparing download. Please try again or reduce selection.', 'error');
+        } else {
+          addNotification(`Download failed (${response.status})`, 'error');
+        }
+        return false;
       }
 
-      // Get the blob and create a download link
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
+      // Try to detect binary zip vs base64 body
+      const contentType = response.headers.get('content-type') || '';
+      let blob: Blob | null = null;
+
+      if (contentType.includes('application/zip') || contentType.includes('application/octet-stream')) {
+        // Binary zip path
+        blob = await response.blob();
+      } else {
+        // Might be base64 string or JSON with base64 body
+        const text = await response.text();
+        try {
+          const parsed = JSON.parse(text);
+          // Case: API Gateway proxy with isBase64Encoded true and body base64
+          const base64 = parsed?.body || parsed?.data || '';
+          if (!base64) throw new Error('No base64 body in response');
+          const byteChars = atob(base64);
+          const bytes = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+          blob = new Blob([bytes], { type: 'application/zip' });
+        } catch {
+          // If plain base64 string
+          try {
+            const byteChars = atob(text.trim());
+            const bytes = new Uint8Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+            blob = new Blob([bytes], { type: 'application/zip' });
+          } catch (e) {
+            console.error('Unexpected download response format');
+            addNotification('Unexpected download response format', 'error');
+            return false;
+          }
+        }
+      }
+
+      if (!blob) {
+        addNotification('Failed to prepare download', 'error');
+        return false;
+      }
+
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename || 'download.jpg';
+      a.href = url;
+      a.download = zipName || 'download.zip';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(blobUrl);
-      
+      window.URL.revokeObjectURL(url);
+
       return true;
     } catch (err: any) {
       console.error('Download error:', err);
@@ -685,47 +562,172 @@ function SharedImages() {
     }
   };
 
-  const handleDownloadSelected = async (downloadAll: boolean = false): Promise<number> => {
-    if (!permissions.canDownload) {
-      addNotification('Downloads are not permitted in this gallery', 'error');
-      return 0;
-    }
-    try {
-      const itemsToDownload = downloadAll
-        ? items
-        : (downloadSelectedItems.length > 0
-            ? items.filter(item => downloadSelectedItems.includes(item.id))
-            : []);
-      if (itemsToDownload.length === 0) {
-        addNotification('No items selected for download', 'error');
-        return 0;
+  // Robust server fallback: try batches; on failure, split into smaller chunks down to single-file zips
+  const downloadWithLambdaBatched = async (
+    keys: string[],
+    baseZipName: string,
+    initialBatchSize: number = 25
+  ): Promise<number> => {
+    let success = 0;
+
+    const tryRange = async (range: string[], nameBase: string, batchSize: number): Promise<void> => {
+      if (range.length === 0) return;
+      if (batchSize <= 1) {
+        for (let i = 0; i < range.length; i++) {
+          const ok = await downloadWithLambda([range[i]], `${nameBase}_single_${i + 1}.zip`);
+          if (ok) success += 1;
+        }
+        return;
       }
-      setIsDownloading(true);
-      setDownloadProgress({ current: 0, total: itemsToDownload.length });
-      let successCount = 0;
-      for (let i = 0; i < itemsToDownload.length; i++) {
-        const item = itemsToDownload[i];
-        const ext = item.isVideo ? 'mp4' : 'jpg';
-        const filename = `${item.title}.${ext}`;
-        const success = await fetchBlobOrDownloadLink(item.imageUrl, filename);
-        if (success) successCount++;
-        setDownloadProgress({ current: i + 1, total: itemsToDownload.length });
-        // Small delay to prevent browser blocking multiple downloads
-        await new Promise(resolve => setTimeout(resolve, 100));
+
+      for (let start = 0, part = 1; start < range.length; start += batchSize, part++) {
+        const end = Math.min(start + batchSize, range.length);
+        const batch = range.slice(start, end);
+        const name = range.length > batchSize ? `${nameBase}_part${part}.zip` : `${nameBase}.zip`;
+        const ok = await downloadWithLambda(batch, name);
+        if (ok) {
+          success += batch.length;
+        } else {
+          const mid = Math.floor(batch.length / 2);
+          await tryRange(batch.slice(0, mid), `${nameBase}_a${part}`, Math.max(1, Math.floor(batchSize / 2)));
+          await tryRange(batch.slice(mid), `${nameBase}_b${part}`, Math.max(1, Math.floor(batchSize / 2)));
+        }
       }
-      setIsDownloading(false);
-      addNotification(`Downloaded ${successCount} of ${itemsToDownload.length} items`, 'success');
-      return successCount;
-    } catch (err: any) {
-      setIsDownloading(false);
-      console.error('Download error:', err);
-      addNotification(
-        `Failed to download items: ${err.message.includes('Forbidden') ? 'Permission denied - check presigned URL or contact support' : err.message}`,
-        'error'
-      );
-      return 0;
-    }
+    };
+
+    await tryRange(keys, baseZipName, Math.max(1, initialBatchSize));
+    return success;
   };
+
+
+
+const handleDownloadSelected = async (downloadAll: boolean = false): Promise<number> => {
+  if (!permissions.canDownload) {
+    addNotification('Downloads are not permitted in this gallery', 'error');
+    return 0;
+  }
+
+  const itemsToDownload = downloadAll
+    ? items
+    : downloadSelectedItems.length > 0
+      ? items.filter(item => downloadSelectedItems.includes(item.id))
+      : [];
+
+  if (itemsToDownload.length === 0) {
+    addNotification('No items selected for download', 'error');
+    return 0;
+  }
+
+  // CASE 1: ≤20 images → Direct download to user's Downloads folder (silent, perfect filename)
+  if (itemsToDownload.length <= 20) {
+    setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: itemsToDownload.length });
+
+    let successCount = 0;
+
+    for (let i = 0; i < itemsToDownload.length; i++) {
+      const item = itemsToDownload[i];
+      const url = item.imageUrl;
+
+      try {
+        // This fetch works 100% with Wasabi pre-signed URLs
+        const response = await fetch(url, {
+          method: 'GET',
+          mode: 'cors',
+          credentials: 'omit',        // CRITICAL: fixes CORS wildcard issue
+          cache: 'no-cache',
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const blob = await response.blob();
+
+        // Build perfect filename
+        const urlPart = url.split('?')[0];
+        const extension = urlPart.split('.').pop()?.toLowerCase() || (item.isVideo ? 'mp4' : 'jpg');
+        const safeTitle = (item.title || `image_${i + 1}`)
+          .replace(/[\\/:*?"<>|]/g, '_')
+          .trim();
+        const filename = `${safeTitle}.${extension}`;
+
+        // Save directly without using an anchor tag
+        saveAs(blob, filename);
+
+        successCount++;
+      } catch (err) {
+        console.error('Download failed for:', url, err);
+        addNotification(`Failed: ${item.title || 'one image'}`, 'warning');
+      }
+
+      setDownloadProgress({ current: i + 1, total: itemsToDownload.length });
+      await new Promise(r => setTimeout(r, 300)); // Prevents popup blocking
+    }
+
+    setIsDownloading(false);
+    addNotification(`Successfully saved ${successCount} image(s) to your Downloads folder!`, 'success');
+    return successCount;
+  }
+
+  // CASE 2: >20 images → Your existing ZIP + Lambda fallback (keep your working code)
+  setIsDownloading(true);
+  setDownloadProgress({ current: 0, total: itemsToDownload.length });
+
+  const zip = new JSZip();
+  const folder = zip.folder('ArifPhotography')!;
+  let clientSuccess = 0;
+  const failedKeys: string[] = [];
+  let warned = false;
+
+  const CONCURRENCY = 6;
+  let index = 0;
+
+  const worker = async (): Promise<void> => {
+    const i = index++;
+    if (i >= itemsToDownload.length) return;
+
+    const item = itemsToDownload[i];
+    try {
+      const res = await fetch(item.imageUrl, { credentials: 'omit' });
+      if (!res.ok) throw new Error('Failed');
+
+      const buffer = await res.arrayBuffer();
+      const urlPart = item.imageUrl.split('?')[0];
+      const ext = (urlPart.split('.').pop() || (item.isVideo ? 'mp4' : 'jpg')).toLowerCase();
+      const name = (item.title || `item_${i + 1}`).replace(/[\\/:*?"<>|]/g, '_');
+      folder.file(`${name}.${ext}`, buffer, { binary: true });
+      clientSuccess++;
+    } catch (e) {
+      if (!warned) {
+        addNotification('Some files blocked. Using server backup...', 'info');
+        warned = true;
+      }
+      if (item.key) failedKeys.push(item.key);
+    } finally {
+      setDownloadProgress(prev => ({
+        current: Math.min(prev.current + 1, itemsToDownload.length),
+        total: itemsToDownload.length
+      }));
+    }
+    await worker();
+  };
+
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, itemsToDownload.length) }, worker));
+
+  // Generate ZIP
+  addNotification('Creating ZIP file...', 'info');
+  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  saveAs(zipBlob, `ArifPhotography_${new Date().toISOString().slice(0,10)}.zip`);
+
+  // Remaining via Lambda
+  if (failedKeys.length > 0) {
+    addNotification(`Downloading ${failedKeys.length} remaining files via server...`, 'info');
+    await downloadWithLambdaBatched(failedKeys, `ArifPhotography_remaining_${new Date().toISOString().slice(0,10)}`, 20);
+  }
+
+  setIsDownloading(false);
+  addNotification(`Downloaded ${clientSuccess + failedKeys.length} items!`, 'success');
+  return clientSuccess + failedKeys.length;
+};
 
   const openDownloadFlow = () => {
     setIsDownloadModalOpen(true);
@@ -757,9 +759,12 @@ function SharedImages() {
   const handleDownloadCurrentImage = async () => {
     if (selectedImageIndex !== null) {
       const item = items[selectedImageIndex];
-      const ext = item.isVideo ? 'mp4' : 'jpg';
-      const filename = `${item.title}.${ext}`;
-      const success = await fetchBlobOrDownloadLink(item.imageUrl, filename);
+      if (!item.key) {
+        addNotification('Cannot download this item: missing file key', 'error');
+        return;
+      }
+
+      const success = await downloadWithLambda([item.key], `ArifPhotography_${item.title}.zip`);
       if (success) {
         addNotification('Item downloaded', 'success');
       }
@@ -1126,7 +1131,7 @@ function SharedImages() {
               <h2 className="text-lg font-light text-gray-900 mb-6 tracking-wide">Images & Videos</h2>
             )}
             <div className={viewMode === 'grid'
-              ? 'columns-2 sm:columns-3 lg:columns-3 gap-2 sm:gap-4 lg:gap-6'
+              ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-6'
               : 'space-y-2 sm:space-y-3'
             }>
               {currentItems.map((item, index) => (
@@ -1166,18 +1171,22 @@ function SharedImages() {
                     <Check className="h-4 w-4" />
                   </button>
                   <div
-                    className={`relative ${viewMode === 'list' ? 'w-32 h-20 flex-shrink-0 rounded-lg overflow-hidden' : ''}`}
+                    className={`relative ${viewMode === 'list' ? 'w-28 h-20 sm:w-32 sm:h-24 flex-shrink-0 rounded-lg overflow-hidden' : 'aspect-[3/4] w-full rounded-lg overflow-hidden'}`}
                     onClick={() => handleViewImage(indexOfFirstItem + index)}
                   >
                     {item.isVideo ? (
-                      <div className="w-full h-56 sm:h-64 bg-gray-900 flex items-center justify-center relative">
-                        <Play className="h-12 w-12 text-white/90 drop-shadow-lg" />
+                      <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
+                        <Play className="h-10 w-10 sm:h-12 sm:w-12 text-white/90 drop-shadow-lg" />
+                        <div className="absolute bottom-2 right-2 bg-black/70 text-white px-2 py-1 text-[10px] rounded-full flex items-center gap-1">
+                          <Play className="h-3 w-3" />
+                          <span>Video</span>
+                        </div>
                       </div>
                     ) : (
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         loading="lazy"
                         decoding="async"
                         onError={(e) => {
@@ -1200,33 +1209,38 @@ function SharedImages() {
               ))}
             </div>
             {totalPages > 1 && (
-              <div className="mt-12 flex justify-center items-center gap-2">
+              <div className="mt-10 flex items-center justify-between gap-3 text-sm">
                 <button
-                  onClick={() => paginate(currentPage - 1)}
+                  onClick={() => currentPage > 1 && paginate(currentPage - 1)}
                   disabled={currentPage === 1}
-                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className={`inline-flex items-center gap-1 px-3 py-2 rounded-full border text-xs sm:text-sm ${
+                    currentPage === 1
+                      ? 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed'
+                      : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                  }`}
                 >
-                  <ChevronLeft className="h-5 w-5 text-gray-600" />
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Previous</span>
                 </button>
-                {Array.from({ length: totalPages }, (_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => paginate(i + 1)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      currentPage === i + 1
-                        ? 'bg-gray-900 text-white'
-                        : 'bg-white border border-gray-200 hover:bg-gray-50 text-gray-700'
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
+
+                <div className="flex flex-col items-center justify-center">
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Page</span>
+                  <span className="text-sm font-medium text-gray-800">
+                    {currentPage} / {totalPages}
+                  </span>
+                </div>
+
                 <button
-                  onClick={() => paginate(currentPage + 1)}
+                  onClick={() => currentPage < totalPages && paginate(currentPage + 1)}
                   disabled={currentPage === totalPages}
-                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className={`inline-flex items-center gap-1 px-3 py-2 rounded-full border text-xs sm:text-sm ${
+                    currentPage === totalPages
+                      ? 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed'
+                      : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                  }`}
                 >
-                  <ChevronRight className="h-5 w-5 text-gray-600" />
+                  <span>Next</span>
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             )}
@@ -1272,70 +1286,106 @@ function SharedImages() {
       {/* Preloading runs silently without UI */}
       {/* Download Flow Modal */}
       {isDownloadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 relative">
-            <div className="flex items-center justify-center mb-4">
-              <Download className="h-8 w-8 text-gray-700" />
-            </div>
-            {downloadStep === 1 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="relative w-full max-w-md mx-auto rounded-2xl bg-white shadow-2xl p-6">
+            {/* Close Button */}
+            <button
+              onClick={() => setIsDownloadModalOpen(false)}
+              className="absolute top-3 right-3 p-2 rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-6">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-900 text-white">
+                <Download className="h-5 w-5" />
+              </div>
               <div>
-                <h3 className="text-xl font-medium text-gray-900 text-center">Download Photos</h3>
-                <label className="block text-xs font-semibold text-gray-700 mt-6 mb-2 uppercase tracking-wider">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={emailInput}
-                  onChange={(e)=>setEmailInput(e.target.value)}
-                  placeholder="janedoe@gmail.com"
-                  className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-800"
-                />
-                <div className="mt-6 flex items-center justify-end gap-3">
-                  <button onClick={()=>setIsDownloadModalOpen(false)} className="px-4 py-2 rounded-lg border">Cancel</button>
+                <h2 className="text-base font-semibold text-gray-900">Download photos & videos</h2>
+                <p className="text-xs text-gray-500">Files will be saved directly to your device.</p>
+              </div>
+            </div>
+
+            {downloadStep === 1 && (
+              <div className="space-y-4">
+                {/* Email Input */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">
+                    Email (optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e)=>setEmailInput(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full px-3 py-2 rounded-md border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                  />
+                  <p className="mt-1 text-[11px] text-gray-500">If provided, we&apos;ll send a confirmation email.</p>
+                </div>
+
+                {/* Simple gallery info */}
+                <div className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <span className="truncate max-w-[60%]">{galleryTitle}</span>
+                  <span>{items.length} item{items.length === 1 ? '' : 's'}</span>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-2">
+                  <button 
+                    onClick={() => setIsDownloadModalOpen(false)} 
+                    className="flex-1 px-3 py-2 rounded-md border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
                   <button
                     onClick={()=>setDownloadStep(3)}
-                    disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)}
-                    className="px-5 py-2 rounded-lg bg-gray-900 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >Next</button>
+                    // Email is optional: allow empty, but if provided it must be valid
+                    disabled={!!emailInput && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)}
+                    className="flex-1 px-3 py-2 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Continue
+                  </button>
                 </div>
               </div>
             )}
+
             {downloadStep === 3 && (
-              <div>
-                <div className="flex items-center justify-center mb-2">
-                  <Check className="h-8 w-8 text-gray-700" />
-                </div>
-                <h3 className="text-xl font-medium text-gray-900 text-center">Download Ready</h3>
-                <p className="text-sm text-gray-600 text-center mt-2">
-                  Your selected images are ready for download. Click the button below.
-                </p>
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900">Download options</h3>
+
+                {/* Status Message */}
                 {downloadInlineMsg && (
-                  <div className="mt-3 text-center text-sm text-gray-700">
+                  <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-700">
                     {downloadInlineMsg}
                   </div>
                 )}
+
+                {/* Progress Bar */}
                 {isModalProcessing && (
-                  <div className="mt-4">
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[11px] text-gray-600">
+                      <span>Downloading...</span>
+                      <span>{downloadProgress.current}/{downloadProgress.total || 0}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                       <div
-                        className="h-2 bg-gray-900 transition-all"
+                        className="h-2 bg-gray-900 transition-all duration-300"
                         style={{ width: `${downloadProgress.total ? Math.round((downloadProgress.current / downloadProgress.total) * 100) : 0}%` }}
                       />
                     </div>
-                    <div className="mt-2 text-xs text-gray-600 text-center">
-                      {downloadProgress.current}/{downloadProgress.total || 0} items
-                    </div>
                   </div>
                 )}
-                <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
-                  <button onClick={()=>!isModalProcessing && setIsDownloadModalOpen(false)} disabled={isModalProcessing} className={`px-4 py-2 rounded-lg border ${isModalProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}>Close</button>
+
+                {/* Download Buttons */}
+                <div className="space-y-2">
                   <button
                     onClick={async ()=>{
                       const total = downloadSelectedItems.length;
                       if (total === 0) return;
                       setIsModalProcessing(true);
                       setModalProcessingAction('selected');
-                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      setDownloadInlineMsg('Downloading your selected images...');
                       const success = await handleDownloadSelected(false);
                       if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
                       setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
@@ -1343,23 +1393,31 @@ function SharedImages() {
                       setModalProcessingAction(null);
                     }}
                     disabled={downloadSelectedItems.length === 0 || isModalProcessing}
-                    className={`px-5 py-2 rounded-lg ${downloadSelectedItems.length === 0 || isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                    className={`w-full px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                      downloadSelectedItems.length === 0 || isModalProcessing
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-900 text-white hover:bg-gray-800'
+                    }`}
                   >
                     {isModalProcessing && modalProcessingAction === 'selected' ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Downloading ({downloadProgress.current}/{downloadProgress.total || downloadSelectedItems.length})
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Downloading Selected ({downloadProgress.current}/{downloadProgress.total || downloadSelectedItems.length})
                       </span>
                     ) : (
-                      <>Download Selected ({downloadSelectedItems.length})</>
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Download className="h-5 w-5" />
+                        Download Selected ({downloadSelectedItems.length})
+                      </span>
                     )}
                   </button>
+
                   <button
                     onClick={async ()=>{
                       const total = items.length;
                       setIsModalProcessing(true);
                       setModalProcessingAction('all');
-                      setDownloadInlineMsg('We will email you once your images finish downloading. Please keep this page open.');
+                      setDownloadInlineMsg('Downloading all images...');
                       const success = await handleDownloadSelected(true);
                       if (emailInput) { setDownloadInlineMsg('Finalizing... sending email confirmation.'); await sendDownloadEmail(emailInput, total, success); }
                       setDownloadInlineMsg('Done. A confirmation email has been sent. You may close this dialog.');
@@ -1367,16 +1425,33 @@ function SharedImages() {
                       setModalProcessingAction(null);
                     }}
                     disabled={isModalProcessing}
-                    className={`px-5 py-2 rounded-lg ${isModalProcessing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-900 text-white'}`}
+                    className={`w-full px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                      isModalProcessing
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50'
+                    }`}
                   >
                     {isModalProcessing && modalProcessingAction === 'all' ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Downloading ({downloadProgress.current}/{downloadProgress.total || items.length})
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Downloading All ({downloadProgress.current}/{downloadProgress.total || items.length})
                       </span>
                     ) : (
-                      <>Download All ({items.length})</>
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Package className="h-5 w-5" />
+                        Download All ({items.length})
+                      </span>
                     )}
+                  </button>
+
+                  <button
+                    onClick={() => !isModalProcessing && setIsDownloadModalOpen(false)}
+                    disabled={isModalProcessing}
+                    className={`w-full px-4 py-2.5 rounded-md border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors ${
+                      isModalProcessing ? 'opacity-60 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    Close
                   </button>
                 </div>
               </div>
