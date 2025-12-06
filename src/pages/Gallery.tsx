@@ -1104,6 +1104,12 @@ const handleShare = async () => {
     return;
   }
 
+  // Validate PIN - must not be empty
+  if (!sharePin || sharePin.trim().length === 0) {
+    addNotification('Please enter a PIN to generate a share link', 'error');
+    return;
+  }
+
   setShareLoading(true);
   addNotification('Generating share link(s)...', 'info');
   try {
@@ -3758,7 +3764,7 @@ const handleShare = async () => {
                       {/* PIN Protection */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          PIN Protection (Optional)
+                          PIN Protection <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
@@ -3766,9 +3772,10 @@ const handleShare = async () => {
                           onChange={(e) => setSharePin(e.target.value)}
                           placeholder="Enter 4-6 digit PIN to protect link"
                           maxLength={6}
+                          required
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                         />
-                        <p className="text-xs text-gray-500 mt-1">Leave empty for no PIN protection. Recipients will need this PIN to access.</p>
+                        <p className="text-xs text-gray-500 mt-1">PIN is required to generate share link. Recipients will need this PIN to access.</p>
                       </div>
                       
                       {/* Generate Link Button */}
